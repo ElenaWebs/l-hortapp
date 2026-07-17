@@ -6,6 +6,9 @@
 <title>l'HortApp — Cuaderno de plantas</title>
 <link rel="manifest" id="manifest-link">
 <meta name="theme-color" content="#7a8b5c">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --paper: #f6f0e4; --paper-dark: #ece3d1; --ink: #3a3226; --ink-soft: #6b6355;
@@ -818,6 +821,26 @@ function renderPlantVisual(p){
   if(p.foto) return `<img src="${p.foto}" alt="${p.nombreComun}" class="plant-photo">`;
   return renderIllustration(p);
 }
+
+/* =========================================================
+   Firebase (sincronización) — inicialización silenciosa
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyDQJC0c8Xg1F1jAGtheyhxwa18LzxgasfI",
+  authDomain: "l-hortapp.firebaseapp.com",
+  projectId: "l-hortapp",
+  storageBucket: "l-hortapp.firebasestorage.app",
+  messagingSenderId: "264872307760",
+  appId: "1:264872307760:web:2c2a1a12e006b3e272d1f5"
+};
+let fb = null;
+try{
+  if(typeof firebase !== "undefined"){
+    firebase.initializeApp(firebaseConfig);
+    firebase.firestore().enablePersistence({synchronizeTabs:true}).catch(()=>{});
+    fb = firebase;
+  }
+}catch(e){ fb = null; }
 
 /* =========================================================
    Estado y persistencia
