@@ -1624,6 +1624,7 @@ function renderGarden(){
         <button class="icon-btn icon-only" id="add-plant-nav" title="Añadir planta" aria-label="Añadir planta">🌱</button>
         <button class="icon-btn icon-only" id="cal-nav" title="Calendario" aria-label="Calendario">📅</button>
         <button class="icon-btn icon-only" id="riego-nav" title="Riego" aria-label="Riego">💧</button>
+        ${isAdmin() ? `<button class="icon-btn icon-only" id="revision-nav" title="Plantas de usuarios" aria-label="Plantas de usuarios">📋</button>` : ""}
         <button class="icon-btn icon-only" id="export-data" title="Exportar mis datos" aria-label="Exportar mis datos">⬇️</button>
         <button class="icon-btn icon-only" id="import-data" title="Importar mis datos" aria-label="Importar mis datos">⬆️</button>
         <button class="icon-btn icon-only" id="signout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">🚪</button>
@@ -1670,6 +1671,14 @@ function bindGardenEvents(){
     currentView.screen="riego";
     renderApp();
   });
+  const revisionNav = document.getElementById("revision-nav");
+  if(revisionNav){
+    revisionNav.addEventListener("click", ()=>{
+      reviewLoaded = false;
+      currentView.screen="revision";
+      renderApp();
+    });
+  }
   document.getElementById("export-data").addEventListener("click", exportData);
   document.getElementById("import-data").addEventListener("click", ()=>{
     document.getElementById("import-file").click();
