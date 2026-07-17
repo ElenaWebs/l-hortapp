@@ -887,6 +887,8 @@ function signInWithGoogle(){
 function signOutUser(){
   firebase.auth().signOut();
 }
+const ADMIN_UIDS = ["jCNfzz9oB9PS4REs4fnn2vjifCr2"];
+function isAdmin(){ return !!(currentUser && ADMIN_UIDS.includes(currentUser.uid)); }
 
 /* =========================================================
    Estado y persistencia
@@ -1433,6 +1435,11 @@ const FICHA_FIELDS = [
   {key:"misNotas", label:"Notas"},
 ];
 const CLIMA_KEYS = ["climaTemperatura","climaHumedad","climaLuzDirecta","climaLuzIndirecta","climaNotas"];
+function isCustomPlant(id){ return getCustomPlants().some(p=>p.id===id); }
+function canEditField(f, p){
+  if(f.key==="misNotas") return true;
+  return isAdmin() || isCustomPlant(p.id);
+}
 
 function renderAuthLoading(){
   return `<div class="login-wrap"><p>Cargando…</p></div>`;
@@ -1667,13 +1674,18 @@ function renderDetail(p){
       <div class="detail-head">
         <div class="detail-title">
           ${currentView.tab==="ficha" && currentView.editMode ? `
-            <input type="text" class="title-edit name-edit" id="edit-nombreComun" value="${escapeHtml(p.nombreComun)}" placeholder="Nombre común">
-            <div class="sci-edit-row">
-              <span class="title-edit sci-edit" contenteditable="true" id="edit-nombreCientifico" data-placeholder="Nombre científico">${escapeHtml(p.nombreCientifico)}</span>
-              <span class="sci-sep">·</span>
-              <span class="familia-label">Familia</span>
-              <span class="title-edit sci-edit" contenteditable="true" id="edit-familia" data-placeholder="sin especificar">${escapeHtml(p.familia)}</span>
-            </div>
+            ${(isAdmin() || isCustomPlant(p.id)) ? `
+              <input type="text" class="title-edit name-edit" id="edit-nombreComun" value="${escapeHtml(p.nombreComun)}" placeholder="Nombre común">
+              <div class="sci-edit-row">
+                <span class="title-edit sci-edit" contenteditable="true" id="edit-nombreCientifico" data-placeholder="Nombre científico">${escapeHtml(p.nombreCientifico)}</span>
+                <span class="sci-sep">·</span>
+                <span class="familia-label">Familia</span>
+                <span class="title-edit sci-edit" contenteditable="true" id="edit-familia" data-placeholder="sin especificar">${escapeHtml(p.familia)}</span>
+              </div>
+            ` : `
+              <h2>${escapeHtml(p.nombreComun)}</h2>
+              ${p.nombreCientifico || p.familia ? `<div class="sci">${escapeHtml(p.nombreCientifico)}${p.familia ? ` · Familia ${escapeHtml(p.familia)}` : ""}</div>` : ""}
+            `}
             <div class="grupo-edit-row">
               <span class="familia-label">Ubicación</span>
               <select id="edit-grupo" class="grupo-select">
@@ -1772,10 +1784,10 @@ function fieldHasContent(f, datos){
 function renderFicha(p){
   const datos = getFicha(p.id);
   const hasAnyContent = FICHA_FIELDS.some(f=> fieldHasContent(f, datos));
-  return `
-    <input type="file" id="descripcion-foto-file" accept="${PHOTO_ACCEPT}" class="hidden">
-    <div class="sections">
-      ${currentView.editMode ? FICHA_FIELDS.map(f=>`
+  const sections = FICHA_FIELDS.map(f=>{
+    const editable = currentView.editMode && canEditField(f, p);
+    if(editable){
+      return `
         <div class="section">
           <h4>${f.label}</h4>
           ${f.special==="clima" ? renderClimaSectionEdit(datos) : f.key==="descripcion" ? `
@@ -1787,15 +1799,24 @@ function renderFicha(p){
             <div class="rich-editable" contenteditable="true" data-key="${f.key}" id="rf-${f.key}" data-placeholder="Aún no has escrito nada aquí. Ve añadiendo tus notas cuando quieras.">${datos[f.key]||""}</div>
           `}
         </div>
-      `).join("") : (hasAnyContent ? FICHA_FIELDS.filter(f=>fieldHasContent(f, datos)).map(f=>`
-        <div class="section">
-          <h4>${f.label}</h4>
-          ${f.special==="clima" ? renderClimaSectionView(datos) : f.key==="descripcion" ? `
-            ${renderDescripcionPhotoView(datos)}
-            ${datos.descripcion ? `<div class="section-view">${datos.descripcion}</div>` : ""}
-          ` : `<div class="section-view">${datos[f.key]}</div>`}
-        </div>
-      `).join("") : `<p class="empty-diary">Esta ficha está vacía. Pulsa "Editar" arriba para empezar a rellenarla.</p>`)}
+      `;
+    }
+    if(!fieldHasContent(f, datos)) return "";
+    return `
+      <div class="section">
+        <h4>${f.label}</h4>
+        ${f.special==="clima" ? renderClimaSectionView(datos) : f.key==="descripcion" ? `
+          ${renderDescripcionPhotoView(datos)}
+          ${datos.descripcion ? `<div class="section-view">${datos.descripcion}</div>` : ""}
+        ` : `<div class="section-view">${datos[f.key]}</div>`}
+      </div>
+    `;
+  }).join("");
+  return `
+    <input type="file" id="descripcion-foto-file" accept="${PHOTO_ACCEPT}" class="hidden">
+    <div class="sections">
+      ${sections}
+      ${(!currentView.editMode && !hasAnyContent) ? `<p class="empty-diary">Esta ficha está vacía. Pulsa "Editar" arriba para empezar a rellenarla.</p>` : ""}
     </div>
   `;
 }
@@ -1839,9 +1860,12 @@ function bindDetailEvents(){
     });
   }
   if(currentView.tab==="ficha" && currentView.editMode){
-    document.getElementById("edit-nombreComun").addEventListener("input", (e)=>{ saveFichaField(currentView.plantId, "nombreComun", e.target.value); });
-    bindPlainTextEditable(document.getElementById("edit-nombreCientifico"), (val)=> saveFichaField(currentView.plantId, "nombreCientifico", val));
-    bindPlainTextEditable(document.getElementById("edit-familia"), (val)=> saveFichaField(currentView.plantId, "familia", val));
+    const editNombreComun = document.getElementById("edit-nombreComun");
+    if(editNombreComun) editNombreComun.addEventListener("input", (e)=>{ saveFichaField(currentView.plantId, "nombreComun", e.target.value); });
+    const editNombreCientifico = document.getElementById("edit-nombreCientifico");
+    if(editNombreCientifico) bindPlainTextEditable(editNombreCientifico, (val)=> saveFichaField(currentView.plantId, "nombreCientifico", val));
+    const editFamilia = document.getElementById("edit-familia");
+    if(editFamilia) bindPlainTextEditable(editFamilia, (val)=> saveFichaField(currentView.plantId, "familia", val));
     document.getElementById("edit-grupo").addEventListener("change", (e)=>{ saveFichaField(currentView.plantId, "grupoUbicacion", e.target.value); });
     const descripcionFotoBtn = document.getElementById("descripcion-foto-btn");
     const descripcionFotoFile = document.getElementById("descripcion-foto-file");
