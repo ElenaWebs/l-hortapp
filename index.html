@@ -1600,7 +1600,7 @@ function renderGarden(){
         <div class="card-actions">
           <button class="icon-btn icon-only foto-card-btn" data-id="${p.id}" title="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"} (${PHOTO_FORMATS_HINT})" aria-label="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"}">📷</button>
           ${p.foto ? `<button class="icon-btn icon-only quitar-foto-card-btn" data-id="${p.id}" title="Quitar foto de portada" aria-label="Quitar foto de portada">🗑️</button>` : ""}
-          <button class="icon-btn icon-only archivar-card-btn" data-id="${p.id}" title="Archivar" aria-label="Archivar">🙈</button>
+          <button class="icon-btn icon-only archivar-card-btn" data-id="${p.id}" title="Ocultar" aria-label="Ocultar">🙈</button>
         </div>
       </div>`;
     }).join("");
@@ -1611,7 +1611,7 @@ function renderGarden(){
       ${renderPlantVisual(p)}
       <div class="name">${p.nombreComun}</div>
       ${p.nombreCientifico ? `<div class="sci">${p.nombreCientifico}</div>` : ""}
-      <button class="icon-btn reactivar-btn" data-id="${p.id}">👁️ Reactivar</button>
+      <button class="icon-btn reactivar-btn" data-id="${p.id}">👁️ Mostrar</button>
     </div>`).join("");
   }
 
@@ -1644,7 +1644,7 @@ function renderGarden(){
       ${grupos.map(g=> g.plantas.length>0 ? `<div class="section-label">${g.label}</div><div class="grid">${cardsFor(g.plantas)}</div>` : "").join("")}
     `}
     ${archivadas.length>0 ? `
-      <div class="section-label" id="archived-toggle" style="cursor:pointer; user-select:none;">${currentView.archivedOpen?"▾":"▸"} Archivadas (${archivadas.length})</div>
+      <div class="section-label" id="archived-toggle" style="cursor:pointer; user-select:none;">${currentView.archivedOpen?"▾":"▸"} Ocultas (${archivadas.length})</div>
       ${currentView.archivedOpen ? `<div class="grid">${archivedCardsFor(archivadas)}</div>` : ""}
     ` : ""}
   `;
@@ -1829,7 +1829,7 @@ function renderDetail(p){
       <div class="detail-actions">
         ${currentView.tab==="ficha" ? `<button class="icon-btn icon-only" id="edit-toggle-btn" title="${currentView.editMode ? "Listo" : "Editar"}" aria-label="${currentView.editMode ? "Listo" : "Editar"}">${currentView.editMode ? "✅" : "✏️"}</button>` : ""}
         ${currentView.tab==="ficha" && currentView.editMode ? `<button class="icon-btn icon-only" id="delete-ficha-btn" title="Eliminar ficha" aria-label="Eliminar ficha">🗑️</button>` : ""}
-        <button class="icon-btn icon-only" id="archive-btn" title="${isArchived(p.id) ? "Reactivar" : "Archivar"}" aria-label="${isArchived(p.id) ? "Reactivar" : "Archivar"}">${isArchived(p.id) ? "👁️" : "🙈"}</button>
+        <button class="icon-btn icon-only" id="archive-btn" title="${isArchived(p.id) ? "Mostrar" : "Ocultar"}" aria-label="${isArchived(p.id) ? "Mostrar" : "Ocultar"}">${isArchived(p.id) ? "👁️" : "🙈"}</button>
         <button class="icon-btn icon-only" id="print-btn" title="Imprimir" aria-label="Imprimir">🖨️</button>
       </div>
     </div>
@@ -1862,7 +1862,7 @@ function renderDetail(p){
           `}
         </div>
       </div>
-      ${isArchived(p.id) ? `<p class="empty-diary">Esta planta está archivada. Sus fichas y su diario siguen intactos.</p>` : ""}
+      ${isArchived(p.id) ? `<p class="empty-diary">Esta planta está oculta de tu jardín. Sus fichas y su diario siguen intactos.</p>` : ""}
       <div class="tabs">
         <button class="tab ${currentView.tab==="ficha"?"active":""}" data-tab="ficha">Ficha</button>
         <button class="tab ${currentView.tab==="diario"?"active":""}" data-tab="diario">Diario</button>
