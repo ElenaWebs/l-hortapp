@@ -1254,6 +1254,87 @@ function importDataFromFile(file){
   reader.onerror = ()=> alert("No se ha podido leer el archivo.");
   reader.readAsText(file);
 }
+function hasLegacyLocalData(){
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k.startsWith("ficha:") || k.startsWith("diario:") || k.startsWith("riego:") || k.startsWith("archivada:")) return true;
+    if(k==="plantasPersonalizadas" || k==="plantasEliminadas") return true;
+  }
+  return false;
+}
+function migrateLegacyData(){
+  if(!fb || !currentUser){ alert("Necesitas haber iniciado sesión para poder subir tus datos."); return; }
+  if(!confirm("Esto sube a tu cuenta los datos que tienes guardados en ESTE dispositivo (fichas, diario, riegos, plantas personalizadas). ¿Ya has exportado una copia de seguridad (botón ⬇️) por si acaso? Pulsa Aceptar solo si ya la tienes, o si prefieres continuar sin ella.")) return;
+
+  const legacyCustomList = store.get("plantasPersonalizadas", []);
+  const legacyCustomIds = new Set(legacyCustomList.map(p=>p.id));
+  legacyCustomList.forEach(plant=>{
+    const {id, ...data} = plant;
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).set(data).catch(()=>{});
+  });
+
+  const officialKeys = FICHA_FIELDS.map(f=>f.key).filter(k=>k!=="misNotas").concat(CLIMA_KEYS).concat(["nombreComun","nombreCientifico","familia"]);
+
+  const plantIds = new Set();
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k.startsWith("ficha:")) plantIds.add(k.slice(6));
+    if(k.startsWith("diario:")) plantIds.add(k.slice(7));
+    if(k.startsWith("riego:")) plantIds.add(k.slice(6));
+    if(k.startsWith("archivada:")) plantIds.add(k.slice(10));
+  }
+
+  plantIds.forEach(id=>{
+    const legacyFicha = store.get(`ficha:${id}`, {});
+    const isCustom = legacyCustomIds.has(id);
+    const officialData = {};
+    const privateData = {};
+    Object.keys(legacyFicha).forEach(key=>{
+      if(PRIVATE_FICHA_KEYS.includes(key)) privateData[key] = legacyFicha[key];
+      else if(officialKeys.includes(key) && isAdmin()) officialData[key] = legacyFicha[key];
+    });
+    if(store.get(`archivada:${id}`, false)) privateData.archivada = true;
+
+    if(isCustom){
+      const extra = {...officialData, ...privateData};
+      if(Object.keys(extra).length){
+        firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).set(extra, {merge:true}).catch(()=>{});
+      }
+    } else {
+      if(Object.keys(officialData).length){
+        firebase.firestore().collection("plantasOficiales").doc(id).set(officialData, {merge:true}).catch(()=>{});
+      }
+      if(Object.keys(privateData).length){
+        firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("fichas").doc(id).set(privateData, {merge:true}).catch(()=>{});
+      }
+    }
+
+    const legacyRiego = store.get(`riego:${id}`, null);
+    if(legacyRiego){
+      firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("riego").doc(id).set({fecha: legacyRiego}).catch(()=>{});
+    }
+
+    const legacyDiario = store.get(`diario:${id}`, []);
+    legacyDiario.forEach(entry=>{
+      const entryId = (typeof crypto!=="undefined" && crypto.randomUUID) ? crypto.randomUUID() : ("e"+Date.now()+Math.random().toString(36).slice(2));
+      firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("diario").doc(id).collection("entries").doc(entryId).set({...entry, createdAt: Date.now()}).catch(()=>{});
+    });
+  });
+
+  const legacyDeleted = store.get("plantasEliminadas", []);
+  legacyDeleted.forEach(id=>{
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("fichas").doc(id).set({archivada:true}, {merge:true}).catch(()=>{});
+  });
+
+  for(let i=localStorage.length-1;i>=0;i--){
+    const k = localStorage.key(i);
+    if(k.startsWith("ficha:") || k.startsWith("diario:") || k.startsWith("riego:") || k.startsWith("archivada:") || k==="plantasPersonalizadas" || k==="plantasEliminadas"){
+      localStorage.removeItem(k);
+    }
+  }
+  alert(`Subida en marcha: ${plantIds.size} plantas, ${legacyCustomList.length} personalizadas y ${legacyDeleted.length} ocultas antiguas. Puede tardar unos segundos en reflejarse.`);
+  renderApp();
+}
 let riegos = {};
 let riegoListenerStarted = false;
 function startRiegoListener(){
@@ -1627,6 +1708,7 @@ function renderGarden(){
         ${isAdmin() ? `<button class="icon-btn icon-only" id="revision-nav" title="Plantas de usuarios" aria-label="Plantas de usuarios">📋</button>` : ""}
         <button class="icon-btn icon-only" id="export-data" title="Exportar mis datos" aria-label="Exportar mis datos">⬇️</button>
         <button class="icon-btn icon-only" id="import-data" title="Importar mis datos" aria-label="Importar mis datos">⬆️</button>
+        ${hasLegacyLocalData() ? `<button class="icon-btn icon-only" id="migrate-btn" title="Subir mis datos de este dispositivo" aria-label="Subir mis datos de este dispositivo">☁️</button>` : ""}
         <button class="icon-btn icon-only" id="signout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">🚪</button>
         <input type="file" id="import-file" accept="application/json" class="hidden">
       </div>
@@ -1688,6 +1770,10 @@ function bindGardenEvents(){
     if(file) importDataFromFile(file);
     e.target.value = "";
   });
+  const migrateBtn = document.getElementById("migrate-btn");
+  if(migrateBtn){
+    migrateBtn.addEventListener("click", migrateLegacyData);
+  }
   document.getElementById("signout-btn").addEventListener("click", ()=>{
     if(confirm("¿Cerrar sesión?")) signOutUser();
   });
