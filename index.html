@@ -958,15 +958,6 @@ function saveFichaPhoto(plantId, key, dataUrl){
   }
   return true;
 }
-function saveDiaryVerified(plantId, entries){
-  saveDiary(plantId, entries);
-  const saved = getDiary(plantId);
-  if(JSON.stringify(saved) !== JSON.stringify(entries)){
-    alert("No se ha podido guardar la entrada: no queda espacio libre en el navegador para esta app. Prueba con menos fotos o borra alguna foto que ya no necesites y vuelve a intentarlo.");
-    return false;
-  }
-  return true;
-}
 function photoPickerHtml(prefix){
   return `
     <div class="diary-photos-row">
@@ -1187,11 +1178,11 @@ function deletePlantCompletely(id){
     if(!deleted.includes(id)){ deleted.push(id); store.set("plantasEliminadas", deleted); }
   }
   delete privateFichas[id];
+  clearRiego(id);
+  Object.keys(diarios[id]||{}).forEach(entryId=> deleteDiaryEntry(id, entryId));
   if(fb && currentUser){
     firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("fichas").doc(id).delete().catch(()=>{});
   }
-  localStorage.removeItem(`diario:${id}`);
-  localStorage.removeItem(`riego:${id}`);
 }
 function addCustomPlant(nombreComun, fotoBase64){
   const slug = nombreComun.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
@@ -1263,14 +1254,41 @@ function importDataFromFile(file){
   reader.onerror = ()=> alert("No se ha podido leer el archivo.");
   reader.readAsText(file);
 }
-function getLastWatering(id){ return store.get(`riego:${id}`, null); }
+let riegos = {};
+let riegoListenerStarted = false;
+function startRiegoListener(){
+  if(riegoListenerStarted || !currentUser) return;
+  riegoListenerStarted = true;
+  try{
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("riego").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = doc.data().fecha; });
+      riegos = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
+function saveRiego(id, iso){
+  riegos[id] = iso;
+  if(fb && currentUser){
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("riego").doc(id).set({fecha: iso}).catch(()=>{});
+  }
+}
+function clearRiego(id){
+  delete riegos[id];
+  if(fb && currentUser){
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("riego").doc(id).delete().catch(()=>{});
+  }
+}
+function getLastWatering(id){
+  startRiegoListener();
+  return riegos[id] !== undefined ? riegos[id] : null;
+}
 function setWateredToday(id){
   const now = new Date();
   const iso = now.toISOString().slice(0,10);
-  store.set(`riego:${id}`, iso);
-  const entries = getDiary(id);
-  entries.push({fecha: now.toLocaleDateString("es-ES"), fechaISO: iso, texto:"Regado", tags:["regado"]});
-  saveDiary(id, entries);
+  saveRiego(id, iso);
+  addDiaryEntry(id, {fecha: now.toLocaleDateString("es-ES"), fechaISO: iso, texto:"Regado", tags:["regado"]});
   render();
 }
 function isWateredToday(id){
@@ -1278,11 +1296,45 @@ function isWateredToday(id){
   return getLastWatering(id) === todayIso;
 }
 function toggleWateredToday(id){
-  if(isWateredToday(id)) store.set(`riego:${id}`, null);
+  if(isWateredToday(id)) clearRiego(id);
   else setWateredToday(id);
 }
-function getDiary(id){ return store.get(`diario:${id}`, []); }
-function saveDiary(id, entries){ store.set(`diario:${id}`, entries); }
+let diarios = {};
+let diarioListeners = {};
+function startDiarioListener(plantId){
+  if(diarioListeners[plantId] || !currentUser) return;
+  diarioListeners[plantId] = true;
+  try{
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("diario").doc(plantId).collection("entries").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = doc.data(); });
+      diarios[plantId] = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
+function getDiary(id){
+  startDiarioListener(id);
+  const entries = diarios[id] || {};
+  return Object.keys(entries).map(entryId=>({...entries[entryId], entryId}))
+    .sort((a,b)=> (a.fechaISO||"").localeCompare(b.fechaISO||"") || (a.createdAt||0)-(b.createdAt||0));
+}
+function addDiaryEntry(plantId, entryData){
+  const entryId = (typeof crypto!=="undefined" && crypto.randomUUID) ? crypto.randomUUID() : ("e"+Date.now()+Math.random().toString(36).slice(2));
+  const withMeta = {...entryData, createdAt: Date.now()};
+  if(!diarios[plantId]) diarios[plantId] = {};
+  diarios[plantId][entryId] = withMeta;
+  if(fb && currentUser){
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("diario").doc(plantId).collection("entries").doc(entryId).set(withMeta).catch(()=>{});
+  }
+  return entryId;
+}
+function deleteDiaryEntry(plantId, entryId){
+  if(diarios[plantId]) delete diarios[plantId][entryId];
+  if(fb && currentUser){
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("diario").doc(plantId).collection("entries").doc(entryId).delete().catch(()=>{});
+  }
+}
 const PRIVATE_FICHA_KEYS = ["misNotas","fotoPortada","descripcionFoto","grupoUbicacion","favorito","archivada","oculta"];
 function getFicha(id){
   if(isCustomPlant(id)) return privateCustomPlants[id] || {};
@@ -1367,8 +1419,8 @@ function fertilizingFreqDays(p){ return abonoFreqDays(p); }
 function getAllEntries(){
   const out = [];
   allPlants().forEach(p=>{
-    getDiary(p.id).forEach((e,idx)=>{
-      out.push({plantId:p.id, plantName:p.nombreComun, fechaISO: e.fechaISO || null, fecha:e.fecha, texto:e.texto||"", tags:e.tags||[], fotos: e.fotos||[], idx});
+    getDiary(p.id).forEach(e=>{
+      out.push({plantId:p.id, plantName:p.nombreComun, fechaISO: e.fechaISO || null, fecha:e.fecha, texto:e.texto||"", tags:e.tags||[], fotos: e.fotos||[], entryId: e.entryId});
     });
   });
   return out;
@@ -1924,7 +1976,7 @@ function renderDiario(p){
     </div>
     <div id="entries-list">
       ${entries.length===0 ? `<p class="empty-diary">Aún no hay entradas. Escribe la primera arriba.</p>` :
-        entries.map((e,i)=>`<div class="entry"><div class="meta">${e.fecha} ${e.tags.map(t=>`<span class="entry-tag">${t}</span>`).join("")}<button class="del" data-idx="${entries.length-1-i}">borrar</button></div><div class="txt">${e.texto}</div>${entryPhotosHtml(e)}</div>`).join("")}
+        entries.map(e=>`<div class="entry"><div class="meta">${e.fecha} ${e.tags.map(t=>`<span class="entry-tag">${t}</span>`).join("")}<button class="del" data-entry-id="${e.entryId}">borrar</button></div><div class="txt">${e.texto}</div>${entryPhotosHtml(e)}</div>`).join("")}
     </div>
   `;
 }
@@ -2032,16 +2084,13 @@ function bindDetailEvents(){
       const html = box.innerHTML;
       const plain = box.textContent.trim();
       if(!plain && selectedTags.length===0 && diaryPendingPhotos.length===0) return;
-      const entries = getDiary(currentView.plantId);
       const now = new Date();
-      entries.push({fecha: now.toLocaleDateString("es-ES"), fechaISO: now.toISOString().slice(0,10), texto:html, tags:selectedTags, fotos: diaryPendingPhotos.slice()});
-      if(saveDiaryVerified(currentView.plantId, entries)) renderApp();
+      addDiaryEntry(currentView.plantId, {fecha: now.toLocaleDateString("es-ES"), fechaISO: now.toISOString().slice(0,10), texto:html, tags:selectedTags, fotos: diaryPendingPhotos.slice()});
+      renderApp();
     });
     document.querySelectorAll(".entry .del").forEach(btn=>{
       btn.addEventListener("click", ()=>{
-        const entries = getDiary(currentView.plantId);
-        entries.splice(parseInt(btn.dataset.idx),1);
-        saveDiary(currentView.plantId, entries);
+        deleteDiaryEntry(currentView.plantId, btn.dataset.entryId);
         renderApp();
       });
     });
@@ -2174,7 +2223,7 @@ function renderCalendarView(){
           <div class="entry predicted"><div class="meta"><b>${e.plantName}</b> <span class="entry-tag" style="border:1px solid ${TAG_COLORS[e.tipo]}; color:${TAG_COLORS[e.tipo]}; background:none;">previsto: ${e.tipo}</span></div></div>
         `).join("") : ""}
         ${selectedEntries.length===0 ? (selectedPredicted.length===0 ? `<p class="empty-diary">Sin entradas este día.</p>` : "") : selectedEntries.map(e=>`
-          <div class="entry"><div class="meta"><b>${e.plantName}</b> ${e.tags.map(t=>`<span class="entry-tag">${t}</span>`).join("")}<button class="del" data-plant="${e.plantId}" data-idx="${e.idx}">borrar</button></div><div class="txt">${e.texto||""}</div>${entryPhotosHtml(e)}</div>
+          <div class="entry"><div class="meta"><b>${e.plantName}</b> ${e.tags.map(t=>`<span class="entry-tag">${t}</span>`).join("")}<button class="del" data-plant="${e.plantId}" data-entry-id="${e.entryId}">borrar</button></div><div class="txt">${e.texto||""}</div>${entryPhotosHtml(e)}</div>
         `).join("")}
       ` : `<p class="empty-diary">Toca un día para ver el detalle de las entradas.</p>`}
     </div>
@@ -2214,10 +2263,8 @@ function bindCalendarEvents(){
       if(!plantId){ alert("Selecciona primero a qué planta se refiere."); return; }
       if(!plain && selectedTags.length===0 && calPendingPhotos.length===0) return;
       const iso = currentView.calSelected;
-      const entries = getDiary(plantId);
-      entries.push({fecha: new Date(iso+"T00:00:00").toLocaleDateString("es-ES"), fechaISO: iso, texto:html, tags:selectedTags, fotos: calPendingPhotos.slice()});
-      if(!saveDiaryVerified(plantId, entries)) return;
-      if(selectedTags.includes("regado")){ store.set(`riego:${plantId}`, iso); }
+      addDiaryEntry(plantId, {fecha: new Date(iso+"T00:00:00").toLocaleDateString("es-ES"), fechaISO: iso, texto:html, tags:selectedTags, fotos: calPendingPhotos.slice()});
+      if(selectedTags.includes("regado")){ saveRiego(plantId, iso); }
       renderApp();
     });
     document.querySelectorAll(".entry-photo-thumb").forEach(img=>{
@@ -2225,10 +2272,7 @@ function bindCalendarEvents(){
     });
     document.querySelectorAll(".cal-day-detail .del").forEach(btn=>{
       btn.addEventListener("click", ()=>{
-        const plantId = btn.dataset.plant;
-        const entries = getDiary(plantId);
-        entries.splice(parseInt(btn.dataset.idx),1);
-        saveDiary(plantId, entries);
+        deleteDiaryEntry(btn.dataset.plant, btn.dataset.entryId);
         renderApp();
       });
     });
