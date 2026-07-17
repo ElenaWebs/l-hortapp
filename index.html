@@ -1335,7 +1335,7 @@ function deleteDiaryEntry(plantId, entryId){
     firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("diario").doc(plantId).collection("entries").doc(entryId).delete().catch(()=>{});
   }
 }
-const PRIVATE_FICHA_KEYS = ["misNotas","fotoPortada","descripcionFoto","grupoUbicacion","favorito","archivada","oculta"];
+const PRIVATE_FICHA_KEYS = ["misNotas","fotoPortada","descripcionFoto","grupoUbicacion","favorito","archivada"];
 function getFicha(id){
   if(isCustomPlant(id)) return privateCustomPlants[id] || {};
   return { ...(officialPlants[id]||{}), ...(privateFichas[id]||{}) };
@@ -1365,8 +1365,6 @@ function saveFichaField(id, key, value){
 }
 function isArchived(id){ return !!getFicha(id).archivada; }
 function setArchived(id, val){ saveFichaField(id, "archivada", val); }
-function isHidden(id){ return !!getFicha(id).oculta; }
-function setHidden(id, val){ saveFichaField(id, "oculta", val); }
 
 function isActiveSeason(p){
   const month = new Date().getMonth()+1;
@@ -1519,7 +1517,7 @@ function getPredictedEventsForMonth(year, month){
 /* =========================================================
    Render
    ========================================================= */
-let currentView = {screen:"garden", plantId:null, tab:"ficha", search:"", sort:"az", archivedOpen:false, hiddenOpen:false, editMode:false};
+let currentView = {screen:"garden", plantId:null, tab:"ficha", search:"", sort:"az", archivedOpen:false, editMode:false};
 const DIARY_TAGS = ["regado","abonado","trasplantado","plaga detectada","poda","floración","tratamiento","siembra de semillas","plantación de esquejes","enraizamiento de esquejes en agua"];
 const FICHA_FIELDS = [
   {key:"otrosNombres", label:"Otros nombres"},
@@ -1572,6 +1570,7 @@ function renderApp(){
   if(currentView.screen==="garden"){ root.innerHTML = renderGarden(); bindGardenEvents(); }
   else if(currentView.screen==="calendar"){ root.innerHTML = renderCalendarView(); bindCalendarEvents(); }
   else if(currentView.screen==="riego"){ root.innerHTML = renderRiegoChecklist(); bindRiegoChecklistEvents(); }
+  else if(currentView.screen==="revision"){ root.innerHTML = renderRevision(); bindRevisionEvents(); }
   else if(currentView.screen==="addPlant"){ root.innerHTML = renderAddPlant(); bindAddPlantEvents(); }
   else { root.innerHTML = renderDetail(allPlants().find(p=>p.id===currentView.plantId)); bindDetailEvents(); }
 }
@@ -1581,15 +1580,14 @@ function renderGarden(){
   let list = allPlants().filter(p=>{
     const q = currentView.search.toLowerCase();
     return !q || p.nombreComun.toLowerCase().includes(q) || p.nombreCientifico.toLowerCase().includes(q);
-  }).filter(p=> !isArchived(p.id) && !isHidden(p.id));
+  }).filter(p=> !isArchived(p.id));
   if(currentView.sort==="az") list.sort((a,b)=>a.nombreComun.localeCompare(b.nombreComun));
   if(currentView.sort==="riego") list.sort((a,b)=>{ const sa=wateringStatus(a), sb=wateringStatus(b); const o={now:0,soon:1,ok:2}; return o[sa.level]-o[sb.level]; });
   if(currentView.sort==="reciente") list.sort((a,b)=> b.fechaAlta.localeCompare(a.fechaAlta));
   if(currentView.sort==="grupo") list.sort((a,b)=> (a.grupo+a.nombreComun).localeCompare(b.grupo+b.nombreComun));
 
   const grupos = GRUPO_OPTIONS.map(g=>({...g, plantas: list.filter(p=>p.grupo===g.value)}));
-  const archivadas = allPlants().filter(p=>isArchived(p.id) && !isHidden(p.id)).sort((a,b)=>a.nombreComun.localeCompare(b.nombreComun));
-  const ocultas = allPlants().filter(p=>isHidden(p.id)).sort((a,b)=>a.nombreComun.localeCompare(b.nombreComun));
+  const archivadas = allPlants().filter(p=>isArchived(p.id)).sort((a,b)=>a.nombreComun.localeCompare(b.nombreComun));
 
   function cardsFor(arr){
     return arr.map(p=>{
@@ -1602,8 +1600,7 @@ function renderGarden(){
         <div class="card-actions">
           <button class="icon-btn icon-only foto-card-btn" data-id="${p.id}" title="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"} (${PHOTO_FORMATS_HINT})" aria-label="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"}">📷</button>
           ${p.foto ? `<button class="icon-btn icon-only quitar-foto-card-btn" data-id="${p.id}" title="Quitar foto de portada" aria-label="Quitar foto de portada">🗑️</button>` : ""}
-          <button class="icon-btn icon-only archivar-card-btn" data-id="${p.id}" title="Archivar" aria-label="Archivar">🗄️</button>
-          <button class="icon-btn icon-only ocultar-card-btn" data-id="${p.id}" title="Ocultar de mi jardín" aria-label="Ocultar de mi jardín">🙈</button>
+          <button class="icon-btn icon-only archivar-card-btn" data-id="${p.id}" title="Archivar" aria-label="Archivar">🙈</button>
         </div>
       </div>`;
     }).join("");
@@ -1614,16 +1611,7 @@ function renderGarden(){
       ${renderPlantVisual(p)}
       <div class="name">${p.nombreComun}</div>
       ${p.nombreCientifico ? `<div class="sci">${p.nombreCientifico}</div>` : ""}
-      <button class="icon-btn reactivar-btn" data-id="${p.id}">♻️ Reactivar</button>
-    </div>`).join("");
-  }
-
-  function hiddenCardsFor(arr){
-    return arr.map(p=>`<div class="card" data-id="${p.id}" style="opacity:.7">
-      ${renderPlantVisual(p)}
-      <div class="name">${p.nombreComun}</div>
-      ${p.nombreCientifico ? `<div class="sci">${p.nombreCientifico}</div>` : ""}
-      <button class="icon-btn mostrar-btn" data-id="${p.id}">👁️ Mostrar de nuevo</button>
+      <button class="icon-btn reactivar-btn" data-id="${p.id}">👁️ Reactivar</button>
     </div>`).join("");
   }
 
@@ -1658,10 +1646,6 @@ function renderGarden(){
     ${archivadas.length>0 ? `
       <div class="section-label" id="archived-toggle" style="cursor:pointer; user-select:none;">${currentView.archivedOpen?"▾":"▸"} Archivadas (${archivadas.length})</div>
       ${currentView.archivedOpen ? `<div class="grid">${archivedCardsFor(archivadas)}</div>` : ""}
-    ` : ""}
-    ${ocultas.length>0 ? `
-      <div class="section-label" id="hidden-toggle" style="cursor:pointer; user-select:none;">${currentView.hiddenOpen?"▾":"▸"} Ocultas de mi jardín (${ocultas.length})</div>
-      ${currentView.hiddenOpen ? `<div class="grid">${hiddenCardsFor(ocultas)}</div>` : ""}
     ` : ""}
   `;
 }
@@ -1716,24 +1700,6 @@ function bindGardenEvents(){
       renderApp();
     });
   });
-  const hiddenToggle = document.getElementById("hidden-toggle");
-  if(hiddenToggle){
-    hiddenToggle.addEventListener("click", ()=>{ currentView.hiddenOpen = !currentView.hiddenOpen; renderApp(); });
-  }
-  document.querySelectorAll(".mostrar-btn").forEach(btn=>{
-    btn.addEventListener("click", (e)=>{
-      e.stopPropagation();
-      setHidden(btn.dataset.id, false);
-      renderApp();
-    });
-  });
-  document.querySelectorAll(".ocultar-card-btn").forEach(btn=>{
-    btn.addEventListener("click", (e)=>{
-      e.stopPropagation();
-      setHidden(btn.dataset.id, true);
-      renderApp();
-    });
-  });
   let pendingPhotoPlantId = null;
   const cardPhotoFile = document.getElementById("card-photo-file");
   document.querySelectorAll(".foto-card-btn").forEach(btn=>{
@@ -1763,6 +1729,61 @@ function bindGardenEvents(){
     }).catch(err=>{
       alert(err.message || "No se ha podido procesar la imagen.");
     });
+  });
+}
+
+let reviewPlants = [];
+let reviewLoaded = false;
+function loadReviewPlants(){
+  if(!fb || !isAdmin()) return;
+  firebase.firestore().collectionGroup("plantasPersonalizadas").get().then(snap=>{
+    reviewPlants = snap.docs.map(doc=>({ id: doc.id, ownerUid: doc.ref.parent.parent.id, ...doc.data() }));
+    reviewLoaded = true;
+    renderApp();
+  }).catch(()=>{ reviewPlants = []; reviewLoaded = true; renderApp(); });
+}
+function publishCustomPlant(ownerUid, plantId){
+  if(!confirm("¿Publicar esta planta como oficial? A partir de ahora será visible para todos y solo tú podrás editarla.")) return;
+  const ownerDoc = firebase.firestore().collection("usuarios").doc(ownerUid).collection("plantasPersonalizadas").doc(plantId);
+  ownerDoc.get().then(doc=>{
+    if(!doc.exists){ alert("Esta planta ya no existe (puede que se haya borrado)."); return; }
+    const data = doc.data();
+    return firebase.firestore().collection("plantasOficiales").doc(plantId).set(data)
+      .then(()=> ownerDoc.delete());
+  }).then(()=>{
+    alert("Planta publicada como oficial.");
+    loadReviewPlants();
+  }).catch(err=>{
+    alert("No se ha podido publicar: " + (err.message || err));
+  });
+}
+function renderRevision(){
+  if(!reviewLoaded){ loadReviewPlants(); }
+  return `
+    <div class="topbar">
+      <button class="icon-btn" id="back">← Jardín</button>
+      <div><h1 style="font-size:1.3rem;">Plantas de usuarios</h1></div>
+    </div>
+    <p class="foto-hint" style="margin:0 0 14px;">Plantas personalizadas creadas por cualquier usuario. Puedes publicarlas como oficiales; después podrás editarlas normalmente desde su ficha.</p>
+    ${!reviewLoaded ? `<p class="empty-diary">Cargando…</p>` : reviewPlants.length===0 ? `<p class="empty-diary">No hay ninguna planta personalizada de otros usuarios todavía.</p>` : `
+      <div class="riego-list">
+        ${reviewPlants.map(p=>`
+          <div class="riego-row" style="flex-wrap:wrap;">
+            <div style="flex:1; min-width:150px;">
+              <div class="riego-name">${escapeHtml(p.nombreComun||"(sin nombre)")}</div>
+              ${p.nombreCientifico ? `<div style="font-style:italic; color:var(--ink-soft); font-size:.82rem;">${escapeHtml(p.nombreCientifico)}</div>` : ""}
+            </div>
+            <button class="icon-btn publicar-btn" data-owner="${p.ownerUid}" data-id="${p.id}">Publicar como oficial</button>
+          </div>
+        `).join("")}
+      </div>
+    `}
+  `;
+}
+function bindRevisionEvents(){
+  document.getElementById("back").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
+  document.querySelectorAll(".publicar-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=> publishCustomPlant(btn.dataset.owner, btn.dataset.id));
   });
 }
 
@@ -1808,8 +1829,7 @@ function renderDetail(p){
       <div class="detail-actions">
         ${currentView.tab==="ficha" ? `<button class="icon-btn icon-only" id="edit-toggle-btn" title="${currentView.editMode ? "Listo" : "Editar"}" aria-label="${currentView.editMode ? "Listo" : "Editar"}">${currentView.editMode ? "✅" : "✏️"}</button>` : ""}
         ${currentView.tab==="ficha" && currentView.editMode ? `<button class="icon-btn icon-only" id="delete-ficha-btn" title="Eliminar ficha" aria-label="Eliminar ficha">🗑️</button>` : ""}
-        <button class="icon-btn icon-only" id="archive-btn" title="${isArchived(p.id) ? "Reactivar" : "Archivar"}" aria-label="${isArchived(p.id) ? "Reactivar" : "Archivar"}">${isArchived(p.id) ? "♻️" : "🗄️"}</button>
-        <button class="icon-btn icon-only" id="hide-btn" title="${isHidden(p.id) ? "Mostrar de nuevo en mi jardín" : "Ocultar de mi jardín"}" aria-label="${isHidden(p.id) ? "Mostrar de nuevo en mi jardín" : "Ocultar de mi jardín"}">${isHidden(p.id) ? "👁️" : "🙈"}</button>
+        <button class="icon-btn icon-only" id="archive-btn" title="${isArchived(p.id) ? "Reactivar" : "Archivar"}" aria-label="${isArchived(p.id) ? "Reactivar" : "Archivar"}">${isArchived(p.id) ? "👁️" : "🙈"}</button>
         <button class="icon-btn icon-only" id="print-btn" title="Imprimir" aria-label="Imprimir">🖨️</button>
       </div>
     </div>
@@ -1986,10 +2006,6 @@ function bindDetailEvents(){
   document.getElementById("print-btn").addEventListener("click", ()=> window.print());
   document.getElementById("archive-btn").addEventListener("click", ()=>{
     setArchived(currentView.plantId, !isArchived(currentView.plantId));
-    renderApp();
-  });
-  document.getElementById("hide-btn").addEventListener("click", ()=>{
-    setHidden(currentView.plantId, !isHidden(currentView.plantId));
     renderApp();
   });
   const editToggleBtn = document.getElementById("edit-toggle-btn");
