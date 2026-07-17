@@ -861,6 +861,28 @@ function startOfficialListener(){
     }, ()=>{});
   }catch(e){}
 }
+let privateFichas = {};
+let privateCustomPlants = {};
+let privateListenersStarted = false;
+function startPrivateListeners(){
+  if(privateListenersStarted) return;
+  privateListenersStarted = true;
+  try{
+    const uid = currentUser.uid;
+    firebase.firestore().collection("usuarios").doc(uid).collection("fichas").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = doc.data(); });
+      privateFichas = next;
+      renderApp();
+    }, ()=>{});
+    firebase.firestore().collection("usuarios").doc(uid).collection("plantasPersonalizadas").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = {id: doc.id, ...doc.data()}; });
+      privateCustomPlants = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
 try{
   if(typeof firebase !== "undefined"){
     firebase.initializeApp(firebaseConfig);
@@ -870,7 +892,7 @@ try{
     firebase.auth().onAuthStateChanged(user=>{
       currentUser = user;
       authReady = true;
-      if(user) startOfficialListener();
+      if(user){ startOfficialListener(); startPrivateListeners(); }
       renderApp();
     });
   }
@@ -1121,8 +1143,13 @@ function bindRichToolbars(scopeEl){
 }
 
 /* --- Plantas añadidas por el usuario --- */
-function getCustomPlants(){ return store.get("plantasPersonalizadas", []); }
-function saveCustomPlants(list){ store.set("plantasPersonalizadas", list); }
+function getCustomPlants(){ return Object.values(privateCustomPlants); }
+function deleteCustomPlant(id){
+  delete privateCustomPlants[id];
+  if(fb && currentUser){
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).delete().catch(()=>{});
+  }
+}
 function getDeletedPlants(){ return store.get("plantasEliminadas", []); }
 const GRUPO_OPTIONS = [
   {value:"interior", label:"Plantas de interior"},
@@ -1153,24 +1180,24 @@ function allPlants(){
   return PLANTS.concat(getCustomPlants()).filter(p=>!deleted.includes(p.id)).map(applyOverrides);
 }
 function deletePlantCompletely(id){
-  const custom = getCustomPlants();
-  const idx = custom.findIndex(p=>p.id===id);
-  if(idx!==-1){
-    custom.splice(idx,1);
-    saveCustomPlants(custom);
+  if(isCustomPlant(id)){
+    deleteCustomPlant(id);
   } else {
     const deleted = getDeletedPlants();
     if(!deleted.includes(id)){ deleted.push(id); store.set("plantasEliminadas", deleted); }
   }
-  localStorage.removeItem(`ficha:${id}`);
+  delete privateFichas[id];
+  if(fb && currentUser){
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("fichas").doc(id).delete().catch(()=>{});
+  }
   localStorage.removeItem(`diario:${id}`);
   localStorage.removeItem(`riego:${id}`);
-  localStorage.removeItem(`archivada:${id}`);
 }
 function addCustomPlant(nombreComun, fotoBase64){
   const slug = nombreComun.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+  const id = `custom-${slug || "planta"}-${Date.now()}`;
   const plant = {
-    id: `custom-${slug || "planta"}-${Date.now()}`,
+    id,
     grupo: "interior",
     nombreComun, nombreCientifico:"", familia:"", genero:"",
     ciclo:{activa:"",reposo:"",notas:""}, luz:"",
@@ -1183,9 +1210,11 @@ function addCustomPlant(nombreComun, fotoBase64){
     palette:{a:"#7a8b5c", b:"#a8b98a", c:"#4a5d3a"}, shape:"generica",
     marcadores:[], foto: fotoBase64 || null
   };
-  const list = getCustomPlants();
-  list.push(plant);
-  saveCustomPlants(list);
+  privateCustomPlants[id] = plant;
+  if(fb && currentUser){
+    const {id: _drop, ...data} = plant;
+    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).set(data).catch(()=>{});
+  }
   return plant;
 }
 
@@ -1254,10 +1283,36 @@ function toggleWateredToday(id){
 }
 function getDiary(id){ return store.get(`diario:${id}`, []); }
 function saveDiary(id, entries){ store.set(`diario:${id}`, entries); }
-function getFicha(id){ return store.get(`ficha:${id}`, {}); }
-function saveFichaField(id, key, value){ const d = getFicha(id); d[key] = value; store.set(`ficha:${id}`, d); }
-function isArchived(id){ return store.get(`archivada:${id}`, false); }
-function setArchived(id, val){ store.set(`archivada:${id}`, val); }
+const PRIVATE_FICHA_KEYS = ["misNotas","fotoPortada","descripcionFoto","grupoUbicacion","favorito","archivada"];
+function getFicha(id){
+  if(isCustomPlant(id)) return privateCustomPlants[id] || {};
+  return { ...(officialPlants[id]||{}), ...(privateFichas[id]||{}) };
+}
+function saveFichaField(id, key, value){
+  if(isCustomPlant(id)){
+    if(!privateCustomPlants[id]) privateCustomPlants[id] = {id};
+    privateCustomPlants[id][key] = value;
+    if(fb && currentUser){
+      firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).set({[key]:value}, {merge:true}).catch(()=>{});
+    }
+    return;
+  }
+  if(PRIVATE_FICHA_KEYS.includes(key)){
+    if(!privateFichas[id]) privateFichas[id] = {};
+    privateFichas[id][key] = value;
+    if(fb && currentUser){
+      firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("fichas").doc(id).set({[key]:value}, {merge:true}).catch(()=>{});
+    }
+  } else if(isAdmin()){
+    if(!officialPlants[id]) officialPlants[id] = {};
+    officialPlants[id][key] = value;
+    if(fb){
+      firebase.firestore().collection("plantasOficiales").doc(id).set({[key]:value}, {merge:true}).catch(()=>{});
+    }
+  }
+}
+function isArchived(id){ return !!getFicha(id).archivada; }
+function setArchived(id, val){ saveFichaField(id, "archivada", val); }
 
 function isActiveSeason(p){
   const month = new Date().getMonth()+1;
