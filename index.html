@@ -847,6 +847,20 @@ const firebaseConfig = {
 let fb = null;
 let currentUser = null;
 let authReady = false;
+let officialPlants = {};
+let officialListenerStarted = false;
+function startOfficialListener(){
+  if(officialListenerStarted) return;
+  officialListenerStarted = true;
+  try{
+    firebase.firestore().collection("plantasOficiales").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = doc.data(); });
+      officialPlants = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
 try{
   if(typeof firebase !== "undefined"){
     firebase.initializeApp(firebaseConfig);
@@ -856,6 +870,7 @@ try{
     firebase.auth().onAuthStateChanged(user=>{
       currentUser = user;
       authReady = true;
+      if(user) startOfficialListener();
       renderApp();
     });
   }
