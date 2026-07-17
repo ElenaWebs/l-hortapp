@@ -62,6 +62,13 @@ button{ font-family: var(--font-body); cursor:pointer; }
 .card .sci{ font-style: italic; font-size: .72rem; color: var(--ink-soft); }
 .badge{ position:absolute; top:8px; right:8px; width:11px; height:11px; border-radius:50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.1); }
 .badge.ok{ background: var(--green); } .badge.soon{ background: var(--amber); } .badge.now{ background: var(--red); }
+.riego-list{ display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
+.riego-row{ display:flex; align-items:center; gap:10px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 14px; cursor:pointer; }
+.riego-row.checked{ opacity:.6; }
+.riego-check{ width:18px; height:18px; flex-shrink:0; }
+.riego-dot{ width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+.riego-dot.ok{ background: var(--green); } .riego-dot.soon{ background: var(--amber); } .riego-dot.now{ background: var(--red); }
+.riego-name{ font-family: var(--font-display); font-weight:600; color: var(--green-deep); }
 .detail{ background:#fffdf8; border:1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: 0 4px 16px var(--shadow); }
 .detail-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
 .detail-title h2{ font-size:1.6rem; margin-bottom:2px; }
@@ -1196,6 +1203,14 @@ function setWateredToday(id){
   saveDiary(id, entries);
   render();
 }
+function isWateredToday(id){
+  const todayIso = new Date().toISOString().slice(0,10);
+  return getLastWatering(id) === todayIso;
+}
+function toggleWateredToday(id){
+  if(isWateredToday(id)) store.set(`riego:${id}`, null);
+  else setWateredToday(id);
+}
 function getDiary(id){ return store.get(`diario:${id}`, []); }
 function saveDiary(id, entries){ store.set(`diario:${id}`, entries); }
 function getFicha(id){ return store.get(`ficha:${id}`, {}); }
@@ -1384,6 +1399,7 @@ function renderApp(){
   const root = document.getElementById("app");
   if(currentView.screen==="garden"){ root.innerHTML = renderGarden(); bindGardenEvents(); }
   else if(currentView.screen==="calendar"){ root.innerHTML = renderCalendarView(); bindCalendarEvents(); }
+  else if(currentView.screen==="riego"){ root.innerHTML = renderRiegoChecklist(); bindRiegoChecklistEvents(); }
   else if(currentView.screen==="addPlant"){ root.innerHTML = renderAddPlant(); bindAddPlantEvents(); }
   else { root.innerHTML = renderDetail(allPlants().find(p=>p.id===currentView.plantId)); bindDetailEvents(); }
 }
@@ -1438,6 +1454,7 @@ function renderGarden(){
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="icon-btn icon-only" id="add-plant-nav" title="Añadir planta" aria-label="Añadir planta">🌱</button>
         <button class="icon-btn icon-only" id="cal-nav" title="Calendario" aria-label="Calendario">📅</button>
+        <button class="icon-btn icon-only" id="riego-nav" title="Riego" aria-label="Riego">💧</button>
         <button class="icon-btn icon-only" id="export-data" title="Exportar mis datos" aria-label="Exportar mis datos">⬇️</button>
         <button class="icon-btn icon-only" id="import-data" title="Importar mis datos" aria-label="Importar mis datos">⬆️</button>
         <input type="file" id="import-file" accept="application/json" class="hidden">
@@ -1477,6 +1494,10 @@ function bindGardenEvents(){
     currentView.screen="calendar";
     if(currentView.calYear===undefined){ const now=new Date(); currentView.calYear=now.getFullYear(); currentView.calMonth=now.getMonth(); }
     if(currentView.calSelected===undefined){ currentView.calSelected = new Date().toISOString().slice(0,10); }
+    renderApp();
+  });
+  document.getElementById("riego-nav").addEventListener("click", ()=>{
+    currentView.screen="riego";
     renderApp();
   });
   document.getElementById("export-data").addEventListener("click", exportData);
@@ -1538,12 +1559,42 @@ function bindGardenEvents(){
   });
 }
 
-function renderDetail(p){
-  const st = wateringStatus(p);
-  const last = getLastWatering(p.id);
-  const dotColor = {ok:"var(--green)", soon:"var(--amber)", now:"var(--red)"}[st.level];
-  const dotText = {ok:`Próximo riego en ~${st.days} días`, soon:`Se acerca el riego (${st.days} día${st.days===1?"":"s"})`, now:`Toca regar ${st.days<0?"— ya se ha pasado":"ya"}`}[st.level];
+function renderRiegoChecklist(){
+  const list = allPlants().filter(p=>!isArchived(p.id)).sort((a,b)=>a.nombreComun.localeCompare(b.nombreComun));
+  const grupos = GRUPO_OPTIONS.map(g=>({...g, plantas: list.filter(p=>p.grupo===g.value)}));
+  return `
+    <div class="topbar">
+      <button class="icon-btn" id="back">← Jardín</button>
+      <div><h1 style="font-size:1.3rem;">Riego de hoy</h1></div>
+    </div>
+    <p class="foto-hint" style="margin:0 0 14px;">Marca las plantas que hayas regado hoy.</p>
+    ${grupos.map(g=> g.plantas.length>0 ? `
+      <div class="section-label">${g.label}</div>
+      <div class="riego-list">
+        ${g.plantas.map(p=>{
+          const st = wateringStatus(p);
+          const checked = isWateredToday(p.id);
+          return `<label class="riego-row ${checked?"checked":""}">
+            <input type="checkbox" class="riego-check" data-id="${p.id}" ${checked?"checked":""}>
+            <span class="riego-dot ${st.level}" title="Riego"></span>
+            <span class="riego-name">${escapeHtml(p.nombreComun)}</span>
+          </label>`;
+        }).join("")}
+      </div>
+    ` : "").join("")}
+  `;
+}
+function bindRiegoChecklistEvents(){
+  document.getElementById("back").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
+  document.querySelectorAll(".riego-check").forEach(el=>{
+    el.addEventListener("change", ()=>{
+      toggleWateredToday(el.dataset.id);
+      renderApp();
+    });
+  });
+}
 
+function renderDetail(p){
   return `
     <div class="topbar">
       <button class="icon-btn" id="back">← Jardín</button>
@@ -1579,11 +1630,6 @@ function renderDetail(p){
         </div>
       </div>
       ${isArchived(p.id) ? `<p class="empty-diary">Esta planta está archivada. Sus fichas y su diario siguen intactos.</p>` : ""}
-      <div class="watering-box">
-        <span class="dot" style="background:${dotColor}"></span>
-        <span>${dotText}${last?` · último riego: ${last}`:" · aún no marcado"}</span>
-        <button id="watered-btn">Regado hoy</button>
-      </div>
       <div class="tabs">
         <button class="tab ${currentView.tab==="ficha"?"active":""}" data-tab="ficha">Ficha</button>
         <button class="tab ${currentView.tab==="diario"?"active":""}" data-tab="diario">Diario</button>
@@ -1720,7 +1766,6 @@ function bindDetailEvents(){
     setArchived(currentView.plantId, !isArchived(currentView.plantId));
     renderApp();
   });
-  document.getElementById("watered-btn").addEventListener("click", ()=> setWateredToday(currentView.plantId));
   const editToggleBtn = document.getElementById("edit-toggle-btn");
   if(editToggleBtn){
     editToggleBtn.addEventListener("click", ()=>{ currentView.editMode = !currentView.editMode; renderApp(); });
