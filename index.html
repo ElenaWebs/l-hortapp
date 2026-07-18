@@ -1168,7 +1168,12 @@ function applyOverrides(p){
 }
 function allPlants(){
   const deleted = getDeletedPlants();
-  return PLANTS.concat(getCustomPlants()).filter(p=>!deleted.includes(p.id)).map(applyOverrides);
+  const customPlants = getCustomPlants();
+  const knownIds = new Set(PLANTS.map(p=>p.id).concat(customPlants.map(p=>p.id)));
+  const newOfficialPlants = Object.keys(officialPlants)
+    .filter(id=>!knownIds.has(id))
+    .map(id=>({id, ...officialPlants[id]}));
+  return PLANTS.concat(customPlants).concat(newOfficialPlants).filter(p=>!deleted.includes(p.id)).map(applyOverrides);
 }
 function deletePlantCompletely(id){
   if(isCustomPlant(id)){
@@ -1186,7 +1191,7 @@ function deletePlantCompletely(id){
 }
 function addCustomPlant(nombreComun, fotoBase64){
   const slug = nombreComun.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
-  const id = `custom-${slug || "planta"}-${Date.now()}`;
+  const id = `nueva-${slug || "planta"}-${Date.now()}`;
   const plant = {
     id,
     grupo: "interior",
@@ -1196,10 +1201,17 @@ function addCustomPlant(nombreComun, fotoBase64){
     palette:{a:"#7a8b5c", b:"#a8b98a", c:"#4a5d3a"}, shape:"generica",
     foto: fotoBase64 || null
   };
-  privateCustomPlants[id] = plant;
-  if(fb && currentUser){
-    const {id: _drop, ...data} = plant;
-    firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).set(data).catch(()=>{});
+  const {id: _drop, ...data} = plant;
+  if(isAdmin()){
+    officialPlants[id] = data;
+    if(fb){
+      firebase.firestore().collection("plantasOficiales").doc(id).set(data).catch(()=>{});
+    }
+  } else {
+    privateCustomPlants[id] = plant;
+    if(fb && currentUser){
+      firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).set(data).catch(()=>{});
+    }
   }
   return plant;
 }
