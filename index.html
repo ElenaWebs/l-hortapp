@@ -1342,6 +1342,27 @@ function migrateLegacyData(){
   alert(`Subida en marcha: ${plantIds.size} plantas, ${legacyCustomList.length} personalizadas y ${legacyDeleted.length} ocultas antiguas. Puede tardar unos segundos en reflejarse.`);
   renderApp();
 }
+function limpiarCamposHeredados(){
+  const id = currentView.plantId;
+  if(!id){ alert("Abre primero la ficha de la planta que quieras limpiar."); return; }
+  const ref = isCustomPlant(id)
+    ? firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id)
+    : firebase.firestore().collection("plantasOficiales").doc(id);
+  ref.get().then(doc=>{
+    if(!doc.exists){ alert("No se ha encontrado esta planta en la nube todavía."); return; }
+    const data = doc.data();
+    const camposMuertosSimples = ["ciclo","luz","temperatura","humedad","sustrato","maceta","trasplante","abonado","floracion","poda","plagas","reproduccion","genero","marcadores"];
+    const updates = {};
+    camposMuertosSimples.forEach(k=>{
+      if(data[k] !== undefined) updates[k] = firebase.firestore.FieldValue.delete();
+    });
+    if(data.riego !== undefined && typeof data.riego === "object"){
+      updates.riego = firebase.firestore.FieldValue.delete();
+    }
+    if(Object.keys(updates).length === 0){ alert("Esta ficha ya está limpia, no había nada que quitar."); return; }
+    return ref.update(updates).then(()=>{ alert("Limpieza aplicada: " + Object.keys(updates).join(", ")); renderApp(); });
+  }).catch(err=> alert("Error: " + (err.message||err)));
+}
 let riegos = {};
 let riegoListenerStarted = false;
 function startRiegoListener(){
