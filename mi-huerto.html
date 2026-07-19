@@ -123,11 +123,11 @@ button{ font-family: var(--font-body); cursor:pointer; }
 .rich-toolbar select{ max-width:92px; }
 .rt-icon-btn{ display:flex; align-items:center; justify-content:center; }
 .rt-apply-all{ font-size:.68rem !important; white-space:nowrap; }
-.rich-editable{ width:100%; font-family:var(--font-body); border:1px solid var(--line); border-radius:10px; padding:10px; font-size:.9rem; min-height:56px; background:#fffefb; color:var(--ink); }
+.rich-editable{ width:100%; font-family:Arial, Helvetica, sans-serif; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:.9rem; min-height:56px; background:#fffefb; color:var(--ink); }
 .rich-editable:empty::before{ content: attr(data-placeholder); color:var(--ink-soft); font-style:italic; }
 .rich-editable:focus{ outline:none; border-color:var(--green); }
 .rich-editable ul, .rich-editable ol, .section-view ul, .section-view ol{ margin:.3em 0; padding-left:22px; }
-.section-view{ margin:0; }
+.section-view{ margin:0; font-family:Arial, Helvetica, sans-serif; }
 .section-view p{ margin:0 0 .5em; }
 .clima-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:12px; }
 .clima-card{ background: var(--paper-dark); border-radius:12px; padding:10px 6px; text-align:center; display:flex; flex-direction:column; gap:4px; align-items:center; }
@@ -861,6 +861,34 @@ function startOfficialListener(){
     }, ()=>{});
   }catch(e){}
 }
+let plagasData = {};
+let plagasListenerStarted = false;
+function startPlagasListener(){
+  if(plagasListenerStarted) return;
+  plagasListenerStarted = true;
+  try{
+    firebase.firestore().collection("plagas").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = doc.data(); });
+      plagasData = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
+let tratamientosData = {};
+let tratamientosListenerStarted = false;
+function startTratamientosListener(){
+  if(tratamientosListenerStarted) return;
+  tratamientosListenerStarted = true;
+  try{
+    firebase.firestore().collection("tratamientos").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = doc.data(); });
+      tratamientosData = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
 let privateFichas = {};
 let privateCustomPlants = {};
 let privateListenersStarted = false;
@@ -892,7 +920,7 @@ try{
     firebase.auth().onAuthStateChanged(user=>{
       currentUser = user;
       authReady = true;
-      if(user){ startOfficialListener(); startPrivateListeners(); }
+      if(user){ startOfficialListener(); startPrivateListeners(); startPlagasListener(); startTratamientosListener(); }
       renderApp();
     });
   }
@@ -1034,20 +1062,6 @@ const RT_TITLES = {
 function richToolbarHtml(targetId){
   const iconBtn = cmd => `<button type="button" class="rt-icon-btn" data-cmd="${cmd}" title="${RT_TITLES[cmd]}" aria-label="${RT_TITLES[cmd]}">${RT_ICONS[cmd]}</button>`;
   return `<div class="rich-toolbar" data-target="${targetId}">
-    <select class="rt-font" title="Tipografía">
-      <option value="">Tipografía</option>
-      <option value="Georgia, 'Iowan Old Style', serif">Serif</option>
-      <option value="Arial">Arial</option>
-      <option value="Arial, Helvetica, sans-serif">Sans-serif</option>
-      <option value="'Courier New', monospace">Monoespaciada</option>
-      <option value="'Brush Script MT', cursive">Manuscrita</option>
-      <option value="Anton">Anton</option>
-      <option value="Oswald">Oswald</option>
-      <option value="'Palanquin Dark'">Palanquin Dark</option>
-      <option value="Lemon">Lemon</option>
-      <option value="'Mochiy Pop One'">Mochi</option>
-    </select>
-    <button type="button" class="rt-apply-all" title="Aplicar esta tipografía a todo el texto">Aplicar a todo</button>
     <select class="rt-size" title="Tamaño de letra">
       <option value="">Tamaño</option>
       <option value="2">Pequeño</option>
@@ -1089,29 +1103,6 @@ function bindRichToolbars(scopeEl){
       btn.addEventListener("mousedown", e=> e.preventDefault());
       btn.addEventListener("click", ()=>{ target.focus(); document.execCommand(btn.dataset.cmd, false, null); });
     });
-    const fontSel = toolbar.querySelector(".rt-font");
-    if(fontSel){
-      fontSel.addEventListener("mousedown", rtSaveSelection);
-      fontSel.addEventListener("change", ()=>{
-        if(!fontSel.value) return;
-        target.focus(); rtRestoreSelection();
-        document.execCommand("fontName", false, fontSel.value);
-      });
-    }
-    const applyAllBtn = toolbar.querySelector(".rt-apply-all");
-    if(applyAllBtn){
-      applyAllBtn.addEventListener("mousedown", e=> e.preventDefault());
-      applyAllBtn.addEventListener("click", ()=>{
-        if(!fontSel.value){ alert("Elige antes una tipografía en el desplegable."); return; }
-        target.focus();
-        const range = document.createRange();
-        range.selectNodeContents(target);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        document.execCommand("fontName", false, fontSel.value);
-      });
-    }
     const sizeSel = toolbar.querySelector(".rt-size");
     if(sizeSel){
       sizeSel.addEventListener("mousedown", rtSaveSelection);
@@ -1363,6 +1354,24 @@ function limpiarCamposHeredados(){
     return ref.update(updates).then(()=>{ alert("Limpieza aplicada: " + Object.keys(updates).join(", ")); renderApp(); });
   }).catch(err=> alert("Error: " + (err.message||err)));
 }
+function migrarFotosOficiales(){
+  if(!isAdmin()){ alert("Solo la administradora puede ejecutar esta migración."); return; }
+  const claves = ["fotoPortada","descripcionFoto"];
+  const ids = Object.keys(privateFichas).filter(id=> !isCustomPlant(id) && claves.some(k=> privateFichas[id][k]));
+  if(ids.length===0){ alert("No hay fotos privadas antiguas que migrar."); return; }
+  const tareas = ids.map(id=>{
+    const datos = privateFichas[id];
+    const paraOficial = {};
+    const paraBorrar = {};
+    claves.forEach(k=>{
+      if(datos[k]){ paraOficial[k] = datos[k]; paraBorrar[k] = firebase.firestore.FieldValue.delete(); }
+    });
+    return firebase.firestore().collection("plantasOficiales").doc(id).set(paraOficial, {merge:true})
+      .then(()=> firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("fichas").doc(id).update(paraBorrar));
+  });
+  Promise.all(tareas).then(()=>{ alert("Fotos migradas a la ficha oficial en " + ids.length + " planta(s): " + ids.join(", ")); renderApp(); })
+    .catch(err=> alert("Error: " + (err.message||err)));
+}
 let riegos = {};
 let riegoListenerStarted = false;
 function startRiegoListener(){
@@ -1444,7 +1453,7 @@ function deleteDiaryEntry(plantId, entryId){
     firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("diario").doc(plantId).collection("entries").doc(entryId).delete().catch(()=>{});
   }
 }
-const PRIVATE_FICHA_KEYS = ["misNotas","fotoPortada","descripcionFoto","grupoUbicacion","favorito","archivada"];
+const PRIVATE_FICHA_KEYS = ["misNotas","grupoUbicacion","favorito","archivada"];
 function getFicha(id){
   if(isCustomPlant(id)) return privateCustomPlants[id] || {};
   return { ...(officialPlants[id]||{}), ...(privateFichas[id]||{}) };
@@ -1539,6 +1548,7 @@ function lastTaggedISO(p, tag){
   return entries[entries.length-1].fechaISO;
 }
 function fertilizingStatus(p){
+  if(!isActiveSeason(p)) return {level:"none", days:null};
   const freq = abonoFreqDays(p);
   if(!freq) return {level:"none", days:null};
   const last = lastTaggedISO(p, "abonado") || p.fechaAlta;
@@ -1681,6 +1691,8 @@ function renderApp(){
   else if(currentView.screen==="riego"){ root.innerHTML = renderRiegoChecklist(); bindRiegoChecklistEvents(); }
   else if(currentView.screen==="revision"){ root.innerHTML = renderRevision(); bindRevisionEvents(); }
   else if(currentView.screen==="addPlant"){ root.innerHTML = renderAddPlant(); bindAddPlantEvents(); }
+  else if(currentView.screen==="refList"){ root.innerHTML = renderRefList(); bindRefListEvents(); }
+  else if(currentView.screen==="refDetail"){ root.innerHTML = renderRefDetail(); bindRefDetailEvents(); }
   else { root.innerHTML = renderDetail(allPlants().find(p=>p.id===currentView.plantId)); bindDetailEvents(); }
 }
 function render(){ renderApp(); }
@@ -1713,8 +1725,6 @@ function renderGarden(){
         <div class="name">${p.nombreComun}</div>
         ${p.nombreCientifico ? `<div class="sci">${p.nombreCientifico}</div>` : ""}
         <div class="card-actions">
-          <button class="icon-btn icon-only foto-card-btn" data-id="${p.id}" title="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"} (${PHOTO_FORMATS_HINT})" aria-label="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"}">📷</button>
-          ${p.foto ? `<button class="icon-btn icon-only quitar-foto-card-btn" data-id="${p.id}" title="Quitar foto de portada" aria-label="Quitar foto de portada">🗑️</button>` : ""}
           <button class="icon-btn icon-only archivar-card-btn" data-id="${p.id}" title="Ocultar" aria-label="Ocultar">🙈</button>
         </div>
       </div>`;
@@ -1739,6 +1749,8 @@ function renderGarden(){
         <button class="icon-btn icon-only" id="add-plant-nav" title="Añadir planta" aria-label="Añadir planta">🌱</button>
         <button class="icon-btn icon-only" id="cal-nav" title="Calendario" aria-label="Calendario">📅</button>
         <button class="icon-btn icon-only" id="riego-nav" title="Riego" aria-label="Riego">💧</button>
+        <button class="icon-btn icon-only" id="plagas-nav" title="Plagas y enfermedades" aria-label="Plagas y enfermedades">🐛</button>
+        <button class="icon-btn icon-only" id="tratamientos-nav" title="Tratamientos" aria-label="Tratamientos">💊</button>
         ${isAdmin() ? `<button class="icon-btn icon-only" id="revision-nav" title="Plantas de usuarios" aria-label="Plantas de usuarios">📋</button>` : ""}
         <button class="icon-btn icon-only" id="export-data" title="Exportar mis datos" aria-label="Exportar mis datos">⬇️</button>
         <button class="icon-btn icon-only" id="import-data" title="Importar mis datos" aria-label="Importar mis datos">⬆️</button>
@@ -1747,7 +1759,6 @@ function renderGarden(){
         <input type="file" id="import-file" accept="application/json" class="hidden">
       </div>
     </div>
-    <input type="file" id="card-photo-file" accept="${PHOTO_ACCEPT}" class="hidden">
     <div class="toolbar">
       <input type="search" id="search" placeholder="Buscar planta..." value="${currentView.search}">
       <select id="sort">
@@ -1786,6 +1797,14 @@ function bindGardenEvents(){
   });
   document.getElementById("riego-nav").addEventListener("click", ()=>{
     currentView.screen="riego";
+    renderApp();
+  });
+  document.getElementById("plagas-nav").addEventListener("click", ()=>{
+    currentView.screen="refList"; currentView.refType="plagas";
+    renderApp();
+  });
+  document.getElementById("tratamientos-nav").addEventListener("click", ()=>{
+    currentView.screen="refList"; currentView.refType="tratamientos";
     renderApp();
   });
   const revisionNav = document.getElementById("revision-nav");
@@ -1830,44 +1849,16 @@ function bindGardenEvents(){
       renderApp();
     });
   });
-  let pendingPhotoPlantId = null;
-  const cardPhotoFile = document.getElementById("card-photo-file");
-  document.querySelectorAll(".foto-card-btn").forEach(btn=>{
-    btn.addEventListener("click", (e)=>{
-      e.stopPropagation();
-      pendingPhotoPlantId = btn.dataset.id;
-      cardPhotoFile.click();
-    });
-  });
-  document.querySelectorAll(".quitar-foto-card-btn").forEach(btn=>{
-    btn.addEventListener("click", (e)=>{
-      e.stopPropagation();
-      if(confirm("¿Quitar la foto de portada de esta planta?")){
-        saveFichaField(btn.dataset.id, "fotoPortada", "");
-        renderApp();
-      }
-    });
-  });
-  cardPhotoFile.addEventListener("change", (e)=>{
-    const file = e.target.files[0];
-    e.target.value = "";
-    if(!file || !pendingPhotoPlantId) return;
-    const plantId = pendingPhotoPlantId;
-    readImageCompressed(file, 1000, 0.82).then(dataUrl=>{
-      saveFichaPhoto(plantId, "fotoPortada", dataUrl);
-      renderApp();
-    }).catch(err=>{
-      alert(err.message || "No se ha podido procesar la imagen.");
-    });
-  });
 }
 
 let reviewPlants = [];
 let reviewLoaded = false;
+let reviewOpenId = null;
+let reviewPendingPhotos = {};
 function loadReviewPlants(){
   if(!fb || !isAdmin()) return;
   firebase.firestore().collectionGroup("plantasPersonalizadas").get().then(snap=>{
-    reviewPlants = snap.docs.map(doc=>({ id: doc.id, ownerUid: doc.ref.parent.parent.id, ...doc.data() }));
+    reviewPlants = snap.docs.map(doc=>({ id: doc.id, ownerUid: doc.ref.parent.parent.id, ...doc.data() })).filter(p=>p.solicitudPublicacion);
     reviewLoaded = true;
     renderApp();
   }).catch(()=>{ reviewPlants = []; reviewLoaded = true; renderApp(); });
@@ -1877,15 +1868,34 @@ function publishCustomPlant(ownerUid, plantId){
   const ownerDoc = firebase.firestore().collection("usuarios").doc(ownerUid).collection("plantasPersonalizadas").doc(plantId);
   ownerDoc.get().then(doc=>{
     if(!doc.exists){ alert("Esta planta ya no existe (puede que se haya borrado)."); return; }
-    const data = doc.data();
+    const data = { ...doc.data(), ...(reviewPendingPhotos[plantId]||{}) };
+    delete data.misNotas;
+    delete data.solicitudPublicacion;
     return firebase.firestore().collection("plantasOficiales").doc(plantId).set(data)
       .then(()=> ownerDoc.delete());
   }).then(()=>{
+    delete reviewPendingPhotos[plantId];
+    if(reviewOpenId===plantId) reviewOpenId = null;
     alert("Planta publicada como oficial.");
     loadReviewPlants();
   }).catch(err=>{
     alert("No se ha podido publicar: " + (err.message || err));
   });
+}
+function renderReviewFichaContent(datos){
+  const sections = FICHA_FIELDS.filter(f=>f.key!=="misNotas").map(f=>{
+    if(!fieldHasContent(f, datos)) return "";
+    return `
+      <div class="section">
+        <h4>${f.label}</h4>
+        ${f.special==="clima" ? renderClimaSectionView(datos) : f.key==="descripcion" ? `
+          ${renderDescripcionPhotoView(datos)}
+          ${datos.descripcion ? `<div class="section-view">${datos.descripcion}</div>` : ""}
+        ` : `<div class="section-view">${datos[f.key]}</div>`}
+      </div>
+    `;
+  }).join("");
+  return sections || `<p class="empty-diary">Esta ficha está vacía.</p>`;
 }
 function renderRevision(){
   if(!reviewLoaded){ loadReviewPlants(); }
@@ -1894,27 +1904,238 @@ function renderRevision(){
       <button class="icon-btn" id="back">← Jardín</button>
       <div><h1 style="font-size:1.3rem;">Plantas de usuarios</h1></div>
     </div>
-    <p class="foto-hint" style="margin:0 0 14px;">Plantas personalizadas creadas por cualquier usuario. Puedes publicarlas como oficiales; después podrás editarlas normalmente desde su ficha.</p>
-    ${!reviewLoaded ? `<p class="empty-diary">Cargando…</p>` : reviewPlants.length===0 ? `<p class="empty-diary">No hay ninguna planta personalizada de otros usuarios todavía.</p>` : `
+    <p class="foto-hint" style="margin:0 0 14px;">Plantas cuyos dueños han solicitado publicarlas. Ábrelas para revisar lo escrito, ponerles fotos y publicarlas como oficiales.</p>
+    ${!reviewLoaded ? `<p class="empty-diary">Cargando…</p>` : reviewPlants.length===0 ? `<p class="empty-diary">No hay ninguna solicitud de publicación pendiente.</p>` : `
       <div class="riego-list">
-        ${reviewPlants.map(p=>`
-          <div class="riego-row" style="flex-wrap:wrap;">
-            <div style="flex:1; min-width:150px;">
-              <div class="riego-name">${escapeHtml(p.nombreComun||"(sin nombre)")}</div>
+        ${reviewPlants.map(p=>{
+          const pending = reviewPendingPhotos[p.id] || {};
+          const foto = pending.foto !== undefined ? pending.foto : p.foto;
+          const descripcionFoto = pending.descripcionFoto !== undefined ? pending.descripcionFoto : p.descripcionFoto;
+          const isOpen = reviewOpenId === p.id;
+          return `
+          <div class="riego-row" style="flex-wrap:wrap; align-items:flex-start;">
+            <div style="flex:1; min-width:150px; cursor:pointer;" class="review-toggle" data-id="${p.id}">
+              <div class="riego-name">${isOpen ? "▾" : "▸"} ${escapeHtml(p.nombreComun||"(sin nombre)")}</div>
               ${p.nombreCientifico ? `<div style="font-style:italic; color:var(--ink-soft); font-size:.82rem;">${escapeHtml(p.nombreCientifico)}</div>` : ""}
             </div>
             <button class="icon-btn publicar-btn" data-owner="${p.ownerUid}" data-id="${p.id}">Publicar como oficial</button>
+            ${isOpen ? `
+              <div style="flex-basis:100%; margin-top:12px; border-top:1px solid var(--line); padding-top:12px;">
+                <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:14px;">
+                  <div>
+                    <div class="familia-label" style="margin-bottom:4px;">Foto de portada</div>
+                    <div class="section-photo-row">
+                      ${foto ? `<img src="${foto}" alt="Foto de portada" class="section-photo">` : ""}
+                      <div class="section-photo-actions">
+                        <button type="button" class="icon-btn icon-only review-portada-btn" data-id="${p.id}" title="${foto ? "Cambiar" : "Subir"}" aria-label="Foto de portada">📷</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="familia-label" style="margin-bottom:4px;">Foto de la descripción</div>
+                    <div class="section-photo-row">
+                      ${descripcionFoto ? `<img src="${descripcionFoto}" alt="Foto de descripción" class="section-photo">` : ""}
+                      <div class="section-photo-actions">
+                        <button type="button" class="icon-btn icon-only review-descripcion-btn" data-id="${p.id}" title="${descripcionFoto ? "Cambiar" : "Subir"}" aria-label="Foto de la descripción">📷</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <input type="file" class="hidden review-portada-file" data-id="${p.id}" accept="${PHOTO_ACCEPT}">
+                <input type="file" class="hidden review-descripcion-file" data-id="${p.id}" accept="${PHOTO_ACCEPT}">
+                <div class="sections">${renderReviewFichaContent({...p, foto, descripcionFoto})}</div>
+              </div>
+            ` : ""}
           </div>
-        `).join("")}
+        `;}).join("")}
       </div>
     `}
   `;
 }
 function bindRevisionEvents(){
   document.getElementById("back").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
-  document.querySelectorAll(".publicar-btn").forEach(btn=>{
-    btn.addEventListener("click", ()=> publishCustomPlant(btn.dataset.owner, btn.dataset.id));
+  document.querySelectorAll(".review-toggle").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      reviewOpenId = reviewOpenId===el.dataset.id ? null : el.dataset.id;
+      renderApp();
+    });
   });
+  document.querySelectorAll(".publicar-btn").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{ e.stopPropagation(); publishCustomPlant(btn.dataset.owner, btn.dataset.id); });
+  });
+  document.querySelectorAll(".review-portada-btn").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      document.querySelector(`.review-portada-file[data-id="${btn.dataset.id}"]`).click();
+    });
+  });
+  document.querySelectorAll(".review-portada-file").forEach(input=>{
+    input.addEventListener("change", (e)=>{
+      const file = e.target.files[0];
+      e.target.value = "";
+      if(!file) return;
+      const id = input.dataset.id;
+      readImageCompressed(file, 1000, 0.82).then(dataUrl=>{
+        if(!reviewPendingPhotos[id]) reviewPendingPhotos[id] = {};
+        reviewPendingPhotos[id].foto = dataUrl;
+        renderApp();
+      }).catch(err=> alert(err.message || "No se ha podido procesar la imagen."));
+    });
+  });
+  document.querySelectorAll(".review-descripcion-btn").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      document.querySelector(`.review-descripcion-file[data-id="${btn.dataset.id}"]`).click();
+    });
+  });
+  document.querySelectorAll(".review-descripcion-file").forEach(input=>{
+    input.addEventListener("change", (e)=>{
+      const file = e.target.files[0];
+      e.target.value = "";
+      if(!file) return;
+      const id = input.dataset.id;
+      readImageCompressed(file, 1200, 0.82).then(dataUrl=>{
+        if(!reviewPendingPhotos[id]) reviewPendingPhotos[id] = {};
+        reviewPendingPhotos[id].descripcionFoto = dataUrl;
+        renderApp();
+      }).catch(err=> alert(err.message || "No se ha podido procesar la imagen."));
+    });
+  });
+}
+
+/* =========================================================
+   Listas de referencia: Plagas y enfermedades / Tratamientos
+   Catálogos compartidos de solo lectura para todos, editables solo por la administradora.
+   ========================================================= */
+const REFERENCE_LISTS = {
+  plagas: { titulo: "Plagas y enfermedades", singular: "plaga o enfermedad" },
+  tratamientos: { titulo: "Tratamientos", singular: "tratamiento" },
+};
+function getRefCache(type){ return type==="plagas" ? plagasData : tratamientosData; }
+function saveRefField(type, id, key, value){
+  if(!isAdmin()) return;
+  const current = getRefCache(type)[id] || {};
+  const updated = {...current, [key]: value};
+  if(type==="plagas") plagasData = {...plagasData, [id]: updated};
+  else tratamientosData = {...tratamientosData, [id]: updated};
+  if(fb){ firebase.firestore().collection(type).doc(id).set({[key]:value}, {merge:true}).catch(()=>{}); }
+}
+function deleteRefItem(type, id){
+  if(!isAdmin()) return;
+  const next = {...getRefCache(type)};
+  delete next[id];
+  if(type==="plagas") plagasData = next; else tratamientosData = next;
+  if(fb){ firebase.firestore().collection(type).doc(id).delete().catch(()=>{}); }
+}
+function renderRefList(){
+  const type = currentView.refType;
+  const cfg = REFERENCE_LISTS[type];
+  const cache = getRefCache(type);
+  const items = Object.keys(cache).map(id=>({id, ...cache[id]})).sort((a,b)=> (a.nombre||"").localeCompare(b.nombre||""));
+  return `
+    <div class="topbar">
+      <button class="icon-btn" id="back">← Jardín</button>
+      <div><h1 style="font-size:1.3rem;">${cfg.titulo}</h1></div>
+    </div>
+    ${isAdmin() ? `
+      <div class="diary-form" style="margin-bottom:16px;">
+        <input type="text" id="new-ref-name" placeholder="Nombre de ${cfg.singular} nueva">
+        <button class="save" id="add-ref-btn">Añadir</button>
+      </div>
+    ` : ""}
+    ${items.length===0 ? `<p class="empty-diary">Todavía no hay ninguna entrada.</p>` : `
+      <div class="riego-list">
+        ${items.map(it=>`
+          <div class="riego-row ref-row" data-id="${it.id}" style="cursor:pointer;">
+            <div class="riego-name">${escapeHtml(it.nombre||"(sin nombre)")}</div>
+          </div>
+        `).join("")}
+      </div>
+    `}
+  `;
+}
+function bindRefListEvents(){
+  document.getElementById("back").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
+  const addBtn = document.getElementById("add-ref-btn");
+  if(addBtn){
+    addBtn.addEventListener("click", ()=>{
+      const nombre = document.getElementById("new-ref-name").value.trim();
+      if(!nombre){ alert("Escribe un nombre."); return; }
+      const type = currentView.refType;
+      const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+      saveRefField(type, id, "nombre", nombre);
+      saveRefField(type, id, "contenido", "");
+      currentView.screen="refDetail"; currentView.refId=id; currentView.refEditMode=true;
+      renderApp();
+    });
+  }
+  document.querySelectorAll(".ref-row").forEach(row=>{
+    row.addEventListener("click", ()=>{
+      currentView.screen="refDetail"; currentView.refId=row.dataset.id; currentView.refEditMode=false;
+      renderApp();
+    });
+  });
+}
+function renderRefDetail(){
+  const type = currentView.refType;
+  const cfg = REFERENCE_LISTS[type];
+  const id = currentView.refId;
+  const item = getRefCache(type)[id] || {nombre:"", contenido:""};
+  const editable = isAdmin() && currentView.refEditMode;
+  return `
+    <div class="topbar">
+      <button class="icon-btn" id="back-ref">← ${cfg.titulo}</button>
+      <div class="detail-actions">
+        ${isAdmin() ? `<button class="icon-btn icon-only" id="ref-edit-toggle-btn" title="${currentView.refEditMode ? "Listo" : "Editar"}" aria-label="${currentView.refEditMode ? "Listo" : "Editar"}">${currentView.refEditMode ? "✅" : "✏️"}</button>` : ""}
+        ${editable ? `<button class="icon-btn icon-only" id="ref-delete-btn" title="Eliminar" aria-label="Eliminar">🗑️</button>` : ""}
+      </div>
+    </div>
+    <div class="detail">
+      <div class="detail-head">
+        <div class="detail-title">
+          ${editable ? `
+            <input type="text" class="title-edit name-edit" id="ref-name-edit" value="${escapeHtml(item.nombre)}" placeholder="Nombre">
+          ` : `
+            <h2>${escapeHtml(item.nombre||"(sin nombre)")}</h2>
+          `}
+        </div>
+      </div>
+      <div class="sections">
+        <div class="section">
+          ${editable ? `
+            ${richToolbarHtml("ref-contenido")}
+            <div class="rich-editable" contenteditable="true" data-key="contenido" id="ref-contenido" data-placeholder="Escribe aquí...">${item.contenido||""}</div>
+          ` : `
+            ${item.contenido ? `<div class="section-view">${item.contenido}</div>` : `<p class="empty-diary">Todavía no hay nada escrito aquí.</p>`}
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+}
+function bindRefDetailEvents(){
+  document.getElementById("back-ref").addEventListener("click", ()=>{ currentView.screen="refList"; renderApp(); });
+  const editToggle = document.getElementById("ref-edit-toggle-btn");
+  if(editToggle){
+    editToggle.addEventListener("click", ()=>{ currentView.refEditMode = !currentView.refEditMode; renderApp(); });
+  }
+  const deleteBtn = document.getElementById("ref-delete-btn");
+  if(deleteBtn){
+    deleteBtn.addEventListener("click", ()=>{
+      if(confirm("¿Eliminar esta entrada? No se puede deshacer.")){
+        deleteRefItem(currentView.refType, currentView.refId);
+        currentView.screen="refList";
+        renderApp();
+      }
+    });
+  }
+  if(currentView.refEditMode && isAdmin()){
+    const nameInput = document.getElementById("ref-name-edit");
+    if(nameInput) nameInput.addEventListener("input", (e)=>{ saveRefField(currentView.refType, currentView.refId, "nombre", e.target.value); });
+    const contenido = document.getElementById("ref-contenido");
+    if(contenido) contenido.addEventListener("input", ()=>{ saveRefField(currentView.refType, currentView.refId, "contenido", contenido.innerHTML); });
+    bindRichToolbars(document);
+  }
 }
 
 function renderRiegoChecklist(){
@@ -1965,6 +2186,17 @@ function renderDetail(p){
     </div>
     <div class="detail">
       <div class="detail-head">
+        ${(isAdmin() && currentView.tab==="ficha" && currentView.editMode) ? `
+          <div class="section-photo-row" style="flex-basis:100%; margin-bottom:10px;">
+            ${p.foto ? `<img src="${p.foto}" alt="Foto de portada" class="section-photo">` : ""}
+            <div class="section-photo-actions">
+              <button type="button" class="icon-btn icon-only" id="portada-foto-btn" title="${p.foto ? "Cambiar foto de portada" : "Subir foto de portada"} (${PHOTO_FORMATS_HINT})" aria-label="Foto de portada">📷</button>
+              ${p.foto ? `<button type="button" class="icon-btn icon-only" id="portada-foto-quitar-btn" title="Quitar foto de portada" aria-label="Quitar foto de portada">🗑️</button>` : ""}
+            </div>
+            <p class="foto-hint">${PHOTO_FORMATS_HINT}</p>
+          </div>
+          <input type="file" id="portada-foto-file" accept="${PHOTO_ACCEPT}" class="hidden">
+        ` : ""}
         <div class="detail-title">
           ${currentView.tab==="ficha" && currentView.editMode ? `
             ${(isAdmin() || isCustomPlant(p.id)) ? `
@@ -1993,6 +2225,17 @@ function renderDetail(p){
         </div>
       </div>
       ${isArchived(p.id) ? `<p class="empty-diary">Esta planta está oculta de tu jardín. Sus fichas y su diario siguen intactos.</p>` : ""}
+      ${(!isAdmin() && isCustomPlant(p.id)) ? `
+        <div class="foto-hint" style="margin:0 0 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          ${p.solicitudPublicacion ? `
+            <span>✅ Has pedido publicar esta planta. La administradora la revisará.</span>
+            <button class="icon-btn" id="cancelar-solicitud-btn">Cancelar solicitud</button>
+          ` : `
+            <button class="save" id="solicitar-publicacion-btn">Solicitar publicación</button>
+            <span>Pide que esta planta pase a estar disponible para todo el mundo.</span>
+          `}
+        </div>
+      ` : ""}
       <div class="tabs">
         <button class="tab ${currentView.tab==="ficha"?"active":""}" data-tab="ficha">Ficha</button>
         <button class="tab ${currentView.tab==="diario"?"active":""}" data-tab="diario">Diario</button>
@@ -2084,7 +2327,7 @@ function renderFicha(p){
         <div class="section">
           <h4>${f.label}</h4>
           ${f.special==="clima" ? renderClimaSectionEdit(datos) : f.key==="descripcion" ? `
-            ${renderDescripcionPhotoEdit(datos)}
+            ${isAdmin() ? renderDescripcionPhotoEdit(datos) : renderDescripcionPhotoView(datos)}
             ${richToolbarHtml(`rf-${f.key}`)}
             <div class="rich-editable" contenteditable="true" data-key="${f.key}" id="rf-${f.key}" data-placeholder="Aún no has escrito nada aquí. Ve añadiendo tus notas cuando quieras.">${datos[f.key]||""}</div>
           ` : `
@@ -2138,6 +2381,20 @@ function bindDetailEvents(){
     setArchived(currentView.plantId, !isArchived(currentView.plantId));
     renderApp();
   });
+  const solicitarBtn = document.getElementById("solicitar-publicacion-btn");
+  if(solicitarBtn){
+    solicitarBtn.addEventListener("click", ()=>{
+      saveFichaField(currentView.plantId, "solicitudPublicacion", true);
+      renderApp();
+    });
+  }
+  const cancelarSolicitudBtn = document.getElementById("cancelar-solicitud-btn");
+  if(cancelarSolicitudBtn){
+    cancelarSolicitudBtn.addEventListener("click", ()=>{
+      saveFichaField(currentView.plantId, "solicitudPublicacion", false);
+      renderApp();
+    });
+  }
   const editToggleBtn = document.getElementById("edit-toggle-btn");
   if(editToggleBtn){
     editToggleBtn.addEventListener("click", ()=>{ currentView.editMode = !currentView.editMode; renderApp(); });
@@ -2160,6 +2417,32 @@ function bindDetailEvents(){
     const editFamilia = document.getElementById("edit-familia");
     if(editFamilia) bindPlainTextEditable(editFamilia, (val)=> saveFichaField(currentView.plantId, "familia", val));
     document.getElementById("edit-grupo").addEventListener("change", (e)=>{ saveFichaField(currentView.plantId, "grupoUbicacion", e.target.value); });
+    const portadaFotoBtn = document.getElementById("portada-foto-btn");
+    const portadaFotoFile = document.getElementById("portada-foto-file");
+    if(portadaFotoBtn){
+      portadaFotoBtn.addEventListener("click", ()=> portadaFotoFile.click());
+      portadaFotoFile.addEventListener("change", (e)=>{
+        const file = e.target.files[0];
+        e.target.value = "";
+        if(!file) return;
+        const plantId = currentView.plantId;
+        readImageCompressed(file, 1000, 0.82).then(dataUrl=>{
+          saveFichaPhoto(plantId, "fotoPortada", dataUrl);
+          renderApp();
+        }).catch(err=>{
+          alert(err.message || "No se ha podido procesar la imagen.");
+        });
+      });
+    }
+    const portadaFotoQuitarBtn = document.getElementById("portada-foto-quitar-btn");
+    if(portadaFotoQuitarBtn){
+      portadaFotoQuitarBtn.addEventListener("click", ()=>{
+        if(confirm("¿Quitar la foto de portada de esta planta?")){
+          saveFichaField(currentView.plantId, "fotoPortada", "");
+          renderApp();
+        }
+      });
+    }
     const descripcionFotoBtn = document.getElementById("descripcion-foto-btn");
     const descripcionFotoFile = document.getElementById("descripcion-foto-file");
     if(descripcionFotoBtn){
@@ -2259,28 +2542,33 @@ function renderAddPlant(){
       <div class="diary-form">
         <label>Nombre común</label>
         <input type="text" id="new-plant-name" placeholder="Ej: Mi cactus del salón">
-        <label>Foto de portada (opcional)</label>
-        <input type="file" id="new-plant-photo" accept="image/*">
-        <div id="new-plant-preview"></div>
+        ${isAdmin() ? `
+          <label>Foto de portada (opcional)</label>
+          <input type="file" id="new-plant-photo" accept="image/*">
+          <div id="new-plant-preview"></div>
+        ` : ""}
         <button class="save" id="save-new-plant">Crear planta</button>
       </div>
-      <p class="empty-diary">Se creará con la ficha vacía, igual que las demás — podrás rellenarla cuando quieras.</p>
+      <p class="empty-diary">${isAdmin() ? "Se creará con la ficha vacía, igual que las demás — podrás rellenarla cuando quieras." : "Se creará como tu planta personal, con la ficha vacía para que la rellenes. Las fotos las añade la administradora al revisarla — cuando quieras que pase a estar disponible para todo el mundo, pídeselo."}</p>
     </div>
   `;
 }
 function bindAddPlantEvents(){
   document.getElementById("back-add").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
   let fotoBase64 = null;
-  document.getElementById("new-plant-photo").addEventListener("change", (e)=>{
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      fotoBase64 = reader.result;
-      document.getElementById("new-plant-preview").innerHTML = `<img src="${fotoBase64}" style="max-width:160px; border-radius:10px; display:block; margin-top:6px;">`;
-    };
-    reader.readAsDataURL(file);
-  });
+  const newPlantPhoto = document.getElementById("new-plant-photo");
+  if(newPlantPhoto){
+    newPlantPhoto.addEventListener("change", (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        fotoBase64 = reader.result;
+        document.getElementById("new-plant-preview").innerHTML = `<img src="${fotoBase64}" style="max-width:160px; border-radius:10px; display:block; margin-top:6px;">`;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
   document.getElementById("save-new-plant").addEventListener("click", ()=>{
     const name = document.getElementById("new-plant-name").value.trim();
     if(!name){ alert("Escribe un nombre para la planta."); return; }
