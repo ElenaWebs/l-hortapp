@@ -889,6 +889,20 @@ function startTratamientosListener(){
     }, ()=>{});
   }catch(e){}
 }
+let deletedPlantsData = {};
+let deletedPlantsListenerStarted = false;
+function startDeletedPlantsListener(){
+  if(deletedPlantsListenerStarted) return;
+  deletedPlantsListenerStarted = true;
+  try{
+    firebase.firestore().collection("plantasEliminadas").onSnapshot(snap=>{
+      const next = {};
+      snap.forEach(doc=>{ next[doc.id] = true; });
+      deletedPlantsData = next;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
+}
 let privateFichas = {};
 let privateCustomPlants = {};
 let privateListenersStarted = false;
@@ -920,7 +934,7 @@ try{
     firebase.auth().onAuthStateChanged(user=>{
       currentUser = user;
       authReady = true;
-      if(user){ startOfficialListener(); startPrivateListeners(); startPlagasListener(); startTratamientosListener(); }
+      if(user){ startOfficialListener(); startPrivateListeners(); startPlagasListener(); startTratamientosListener(); startDeletedPlantsListener(); }
       renderApp();
     });
   }
@@ -1146,7 +1160,7 @@ function deleteCustomPlant(id){
     firebase.firestore().collection("usuarios").doc(currentUser.uid).collection("plantasPersonalizadas").doc(id).delete().catch(()=>{});
   }
 }
-function getDeletedPlants(){ return store.get("plantasEliminadas", []); }
+function getDeletedPlants(){ return Object.keys(deletedPlantsData); }
 const GRUPO_OPTIONS = [
   {value:"interior", label:"Plantas de interior"},
   {value:"exterior", label:"Plantas de exterior"},
@@ -1183,9 +1197,13 @@ function allPlants(){
 function deletePlantCompletely(id){
   if(isCustomPlant(id)){
     deleteCustomPlant(id);
-  } else {
-    const deleted = getDeletedPlants();
-    if(!deleted.includes(id)){ deleted.push(id); store.set("plantasEliminadas", deleted); }
+  } else if(isAdmin()){
+    deletedPlantsData = {...deletedPlantsData, [id]: true};
+    delete officialPlants[id];
+    if(fb){
+      firebase.firestore().collection("plantasEliminadas").doc(id).set({eliminada:true}).catch(()=>{});
+      firebase.firestore().collection("plantasOficiales").doc(id).delete().catch(()=>{});
+    }
   }
   delete privateFichas[id];
   clearRiego(id);
@@ -2202,7 +2220,7 @@ function renderDetail(p){
       <button class="icon-btn" id="back">← Jardín</button>
       <div class="detail-actions">
         ${currentView.tab==="ficha" ? `<button class="icon-btn icon-only" id="edit-toggle-btn" title="${currentView.editMode ? "Listo" : "Editar"}" aria-label="${currentView.editMode ? "Listo" : "Editar"}">${currentView.editMode ? "✅" : "✏️"}</button>` : ""}
-        ${currentView.tab==="ficha" && currentView.editMode ? `<button class="icon-btn icon-only" id="delete-ficha-btn" title="Eliminar ficha" aria-label="Eliminar ficha">🗑️</button>` : ""}
+        ${currentView.tab==="ficha" && currentView.editMode && (isAdmin() || isCustomPlant(p.id)) ? `<button class="icon-btn icon-only" id="delete-ficha-btn" title="Eliminar ficha" aria-label="Eliminar ficha">🗑️</button>` : ""}
         <button class="icon-btn icon-only" id="archive-btn" title="${isArchived(p.id) ? "Mostrar" : "Ocultar"}" aria-label="${isArchived(p.id) ? "Mostrar" : "Ocultar"}">${isArchived(p.id) ? "👁️" : "🙈"}</button>
         <button class="icon-btn icon-only" id="print-btn" title="Imprimir" aria-label="Imprimir">🖨️</button>
       </div>
@@ -2342,8 +2360,9 @@ function fieldHasContent(f, datos){
 }
 function renderFicha(p){
   const datos = getFicha(p.id);
-  const hasAnyContent = FICHA_FIELDS.some(f=> fieldHasContent(f, datos));
-  const sections = FICHA_FIELDS.map(f=>{
+  const campos = FICHA_FIELDS.filter(f=> f.key!=="misNotas" || !isCustomPlant(p.id));
+  const hasAnyContent = campos.some(f=> fieldHasContent(f, datos));
+  const sections = campos.map(f=>{
     const editable = currentView.editMode && canEditField(f, p);
     if(editable){
       return `
@@ -2572,7 +2591,7 @@ function renderAddPlant(){
         ` : ""}
         <button class="save" id="save-new-plant">Crear planta</button>
       </div>
-      <p class="empty-diary">${isAdmin() ? "Se creará con la ficha vacía, igual que las demás — podrás rellenarla cuando quieras." : "Se creará como tu planta personal, con la ficha vacía para que la rellenes. Las fotos las añade la administradora al revisarla — cuando quieras que pase a estar disponible para todo el mundo, pídeselo."}</p>
+      <p class="empty-diary">${isAdmin() ? "Se creará con la ficha vacía, igual que las demás — podrás rellenarla cuando quieras." : "Se creará con la ficha vacía para que la rellenes. Mientras no esté publicada, solo tú la ves y puedes editarlo todo. Las fotos las añade la administradora al revisarla — pídeselo cuando quieras que pase a estar disponible para todo el mundo."}</p>
     </div>
   `;
 }
