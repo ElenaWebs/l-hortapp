@@ -156,6 +156,7 @@ button{ font-family: var(--font-body); cursor:pointer; }
 .hidden{ display:none !important; }
 .no-results{ color: var(--ink-soft); font-style: italic; padding: 20px; text-align:center; }
 .fert-badge{ position:absolute; top:8px; left:8px; font-size:1rem; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); }
+.review-badge{ position:absolute; top:-6px; right:-6px; background:var(--red); color:#fff; font-size:.65rem; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:flex; align-items:center; justify-content:center; padding:0 3px; line-height:1; }
 .cal-grid{ display:grid; grid-template-columns: repeat(7,1fr); gap:4px; margin: 14px 0; }
 .cal-head{ text-align:center; font-size:.72rem; color:var(--ink-soft); font-weight:600; }
 .cal-cell{ min-height:52px; border:1px solid var(--line); border-radius:8px; padding:4px; background:#fffdf8; cursor:pointer; position:relative; }
@@ -927,7 +928,7 @@ try{
     firebase.auth().onAuthStateChanged(user=>{
       currentUser = user;
       authReady = true;
-      if(user){ startOfficialListener(); startPrivateListeners(); startPlagasListener(); startTratamientosListener(); startDeletedPlantsListener(); }
+      if(user){ startOfficialListener(); startPrivateListeners(); startPlagasListener(); startTratamientosListener(); startDeletedPlantsListener(); startReviewListener(); }
       renderApp();
     });
   }
@@ -1925,7 +1926,7 @@ function renderGarden(){
         <button class="icon-btn icon-only" id="riego-nav" title="Riego" aria-label="Riego">💧</button>
         <button class="icon-btn icon-only" id="plagas-nav" title="Plagas y enfermedades" aria-label="Plagas y enfermedades">🐛</button>
         <button class="icon-btn icon-only" id="tratamientos-nav" title="Tratamientos" aria-label="Tratamientos">💊</button>
-        ${isAdmin() ? `<button class="icon-btn icon-only" id="revision-nav" title="Plantas de usuarios" aria-label="Plantas de usuarios">📋</button>` : ""}
+        ${isAdmin() ? `<button class="icon-btn icon-only" id="revision-nav" title="Plantas de usuarios" aria-label="Plantas de usuarios" style="position:relative;">📋${reviewPlants.length>0 ? `<span class="review-badge">${reviewPlants.length}</span>` : ""}</button>` : ""}
         <button class="icon-btn icon-only" id="export-data" title="Exportar mis datos" aria-label="Exportar mis datos">⬇️</button>
         <button class="icon-btn icon-only" id="import-data" title="Importar mis datos" aria-label="Importar mis datos">⬆️</button>
         ${hasLegacyLocalData() ? `<button class="icon-btn icon-only" id="migrate-btn" title="Subir mis datos de este dispositivo" aria-label="Subir mis datos de este dispositivo">☁️</button>` : ""}
@@ -1984,7 +1985,6 @@ function bindGardenEvents(){
   const revisionNav = document.getElementById("revision-nav");
   if(revisionNav){
     revisionNav.addEventListener("click", ()=>{
-      reviewLoaded = false;
       currentView.screen="revision";
       renderApp();
     });
@@ -2027,15 +2027,19 @@ function bindGardenEvents(){
 
 let reviewPlants = [];
 let reviewLoaded = false;
+let reviewListenerStarted = false;
 let reviewOpenId = null;
 let reviewPendingPhotos = {};
-function loadReviewPlants(){
-  if(!fb || !isAdmin()) return;
-  firebase.firestore().collectionGroup("plantasPersonalizadas").get().then(snap=>{
-    reviewPlants = snap.docs.map(doc=>({ id: doc.id, ownerUid: doc.ref.parent.parent.id, ...doc.data() })).filter(p=>p.solicitudPublicacion);
-    reviewLoaded = true;
-    renderApp();
-  }).catch(()=>{ reviewPlants = []; reviewLoaded = true; renderApp(); });
+function startReviewListener(){
+  if(reviewListenerStarted || !fb || !isAdmin()) return;
+  reviewListenerStarted = true;
+  try{
+    firebase.firestore().collectionGroup("plantasPersonalizadas").onSnapshot(snap=>{
+      reviewPlants = snap.docs.map(doc=>({ id: doc.id, ownerUid: doc.ref.parent.parent.id, ...doc.data() })).filter(p=>p.solicitudPublicacion);
+      reviewLoaded = true;
+      renderApp();
+    }, ()=>{});
+  }catch(e){}
 }
 function publishCustomPlant(ownerUid, plantId){
   if(!confirm("¿Publicar esta planta como oficial? A partir de ahora será visible para todos y solo tú podrás editarla.")) return;
@@ -2051,7 +2055,7 @@ function publishCustomPlant(ownerUid, plantId){
     delete reviewPendingPhotos[plantId];
     if(reviewOpenId===plantId) reviewOpenId = null;
     alert("Planta publicada como oficial.");
-    loadReviewPlants();
+    renderApp();
   }).catch(err=>{
     alert("No se ha podido publicar: " + (err.message || err));
   });
@@ -2072,7 +2076,7 @@ function renderReviewFichaContent(datos){
   return sections || `<p class="empty-diary">Esta ficha está vacía.</p>`;
 }
 function renderRevision(){
-  if(!reviewLoaded){ loadReviewPlants(); }
+  startReviewListener();
   return `
     <div class="topbar">
       <button class="icon-btn" id="back">← Jardín</button>
