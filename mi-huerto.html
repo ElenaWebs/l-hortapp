@@ -2541,7 +2541,13 @@ function renderDiario(p){
 
 function bindDetailEvents(){
   document.getElementById("back").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
-  document.getElementById("print-btn").addEventListener("click", ()=> window.print());
+  document.getElementById("print-btn").addEventListener("click", ()=>{
+    if(!fb){ window.print(); return; }
+    firebase.firestore().disableNetwork().catch(()=>{}).then(()=>{
+      window.print();
+      firebase.firestore().enableNetwork().catch(()=>{});
+    });
+  });
   document.getElementById("archive-btn").addEventListener("click", ()=>{
     setArchived(currentView.plantId, !isArchived(currentView.plantId));
     renderApp();
