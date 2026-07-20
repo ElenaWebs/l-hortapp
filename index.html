@@ -1492,6 +1492,41 @@ function migrarFotosOficiales(){
   Promise.all(tareas).then(()=>{ alert("Fotos migradas a la ficha oficial en " + ids.length + " planta(s): " + ids.join(", ")); renderApp(); })
     .catch(err=> alert("Error: " + (err.message||err)));
 }
+function recompressDataUrl(dataUrl, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onerror = ()=> reject(new Error("No se ha podido procesar la imagen."));
+    img.onload = ()=>{
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if(w > maxDim || h > maxDim){
+        if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
+        else { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.src = dataUrl;
+  });
+}
+function reoptimizarFotosFicha(){
+  const id = currentView.plantId;
+  if(!id){ alert("Abre primero la ficha de la planta que quieras optimizar."); return; }
+  if(!isAdmin()){ alert("Solo la administradora puede ejecutar esto."); return; }
+  const datos = getFicha(id);
+  const claves = ["fotoPortada","descripcionFoto"];
+  const pesoAntes = claves.reduce((sum,k)=> sum + (datos[k]?datos[k].length:0), 0);
+  const tareas = claves.filter(k=> datos[k]).map(k=>
+    recompressDataUrl(datos[k], 900, 0.75).then(dataUrl=> saveFichaField(id, k, dataUrl))
+  );
+  if(tareas.length===0){ alert("Esta ficha no tiene fotos que optimizar."); return; }
+  Promise.all(tareas).then(()=>{
+    const pesoDespues = claves.reduce((sum,k)=> sum + (getFicha(id)[k]?getFicha(id)[k].length:0), 0);
+    alert(`Fotos optimizadas: de ${Math.round(pesoAntes/1024)} KB a ${Math.round(pesoDespues/1024)} KB.`);
+    renderApp();
+  }).catch(err=> alert("Error: " + (err.message||err)));
+}
 let riegos = {};
 let riegoListenerStarted = false;
 function startRiegoListener(){
@@ -2104,7 +2139,7 @@ function bindRevisionEvents(){
       e.target.value = "";
       if(!file) return;
       const id = input.dataset.id;
-      readImageCompressed(file, 1000, 0.82).then(dataUrl=>{
+      readImageCompressed(file, 900, 0.75).then(dataUrl=>{
         if(!reviewPendingPhotos[id]) reviewPendingPhotos[id] = {};
         reviewPendingPhotos[id].foto = dataUrl;
         renderApp();
@@ -2123,7 +2158,7 @@ function bindRevisionEvents(){
       e.target.value = "";
       if(!file) return;
       const id = input.dataset.id;
-      readImageCompressed(file, 1200, 0.82).then(dataUrl=>{
+      readImageCompressed(file, 900, 0.75).then(dataUrl=>{
         if(!reviewPendingPhotos[id]) reviewPendingPhotos[id] = {};
         reviewPendingPhotos[id].descripcionFoto = dataUrl;
         renderApp();
@@ -2556,7 +2591,7 @@ function bindDetailEvents(){
         e.target.value = "";
         if(!file) return;
         const plantId = currentView.plantId;
-        readImageCompressed(file, 1000, 0.82).then(dataUrl=>{
+        readImageCompressed(file, 900, 0.75).then(dataUrl=>{
           saveFichaPhoto(plantId, "fotoPortada", dataUrl);
           renderApp();
         }).catch(err=>{
@@ -2582,7 +2617,7 @@ function bindDetailEvents(){
         e.target.value = "";
         if(!file) return;
         const plantId = currentView.plantId;
-        readImageCompressed(file, 1200, 0.82).then(dataUrl=>{
+        readImageCompressed(file, 900, 0.75).then(dataUrl=>{
           saveFichaPhoto(plantId, "descripcionFoto", dataUrl);
           renderApp();
         }).catch(err=>{
