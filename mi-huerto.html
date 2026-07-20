@@ -917,6 +917,12 @@ function startPrivateListeners(){
       privateCustomPlants = next;
       renderApp();
     }, ()=>{});
+    firebase.firestore().collection("usuarios").doc(uid).collection("notificaciones").onSnapshot(snap=>{
+      snap.forEach(doc=>{
+        alert(doc.data().mensaje);
+        doc.ref.delete().catch(()=>{});
+      });
+    }, ()=>{});
   }catch(e){}
 }
 try{
@@ -2041,16 +2047,23 @@ function startReviewListener(){
     }, ()=>{});
   }catch(e){}
 }
+function notifyOwner(ownerUid, mensaje){
+  firebase.firestore().collection("usuarios").doc(ownerUid).collection("notificaciones").doc().set({
+    mensaje, fecha: new Date().toISOString()
+  }).catch(()=>{});
+}
 function publishCustomPlant(ownerUid, plantId){
   if(!confirm("¿Publicar esta planta como oficial? A partir de ahora será visible para todos y solo tú podrás editarla.")) return;
   const ownerDoc = firebase.firestore().collection("usuarios").doc(ownerUid).collection("plantasPersonalizadas").doc(plantId);
   ownerDoc.get().then(doc=>{
     if(!doc.exists){ alert("Esta planta ya no existe (puede que se haya borrado)."); return; }
     const data = { ...doc.data(), ...(reviewPendingPhotos[plantId]||{}) };
+    const nombrePlanta = data.nombreComun || "tu planta";
     delete data.misNotas;
     delete data.solicitudPublicacion;
     return firebase.firestore().collection("plantasOficiales").doc(plantId).set(data)
-      .then(()=> ownerDoc.delete());
+      .then(()=> ownerDoc.delete())
+      .then(()=> notifyOwner(ownerUid, `Tu aportación "${nombrePlanta}" ha sido publicada con éxito.`));
   }).then(()=>{
     delete reviewPendingPhotos[plantId];
     if(reviewOpenId===plantId) reviewOpenId = null;
@@ -2059,6 +2072,18 @@ function publishCustomPlant(ownerUid, plantId){
   }).catch(err=>{
     alert("No se ha podido publicar: " + (err.message || err));
   });
+}
+function rejectCustomPlant(ownerUid, plantId, nombrePlanta){
+  const motivo = prompt(`Escribe el motivo del rechazo (se enviará a la persona que la creó):`, `Tu aportación "${nombrePlanta}" ha sido rechazada por `);
+  if(motivo===null) return;
+  if(!motivo.trim()){ alert("Escribe un motivo antes de rechazarla."); return; }
+  const ownerDoc = firebase.firestore().collection("usuarios").doc(ownerUid).collection("plantasPersonalizadas").doc(plantId);
+  ownerDoc.update({solicitudPublicacion: false}).then(()=>{
+    notifyOwner(ownerUid, motivo);
+    if(reviewOpenId===plantId) reviewOpenId = null;
+    alert("Solicitud rechazada. Se ha avisado a la persona que la creó.");
+    renderApp();
+  }).catch(err=> alert("No se ha podido rechazar: " + (err.message||err)));
 }
 function renderReviewFichaContent(datos){
   const sections = FICHA_FIELDS.filter(f=>f.key!=="misNotas").map(f=>{
@@ -2097,6 +2122,7 @@ function renderRevision(){
               ${p.nombreCientifico ? `<div style="font-style:italic; color:var(--ink-soft); font-size:.82rem;">${escapeHtml(p.nombreCientifico)}</div>` : ""}
             </div>
             <button class="icon-btn publicar-btn" data-owner="${p.ownerUid}" data-id="${p.id}">Publicar como oficial</button>
+            <button class="icon-btn rechazar-btn" data-owner="${p.ownerUid}" data-id="${p.id}" data-nombre="${escapeHtml(p.nombreComun||"tu planta")}">Rechazar publicación</button>
             ${isOpen ? `
               <div style="flex-basis:100%; margin-top:12px; border-top:1px solid var(--line); padding-top:12px;">
                 <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:14px;">
@@ -2140,6 +2166,9 @@ function bindRevisionEvents(){
   });
   document.querySelectorAll(".publicar-btn").forEach(btn=>{
     btn.addEventListener("click", (e)=>{ e.stopPropagation(); publishCustomPlant(btn.dataset.owner, btn.dataset.id); });
+  });
+  document.querySelectorAll(".rechazar-btn").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{ e.stopPropagation(); rejectCustomPlant(btn.dataset.owner, btn.dataset.id, btn.dataset.nombre); });
   });
   document.querySelectorAll(".review-portada-btn").forEach(btn=>{
     btn.addEventListener("click", (e)=>{
