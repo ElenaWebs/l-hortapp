@@ -955,6 +955,10 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
 function escapeHtml(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function isSafariBrowser(){
+  const ua = navigator.userAgent;
+  return /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua);
+}
 const PHOTO_ACCEPT = "image/jpeg,image/png,image/gif,image/webp";
 const PHOTO_FORMATS_HINT = "Formatos admitidos: JPG, PNG, GIF, WEBP.";
 function readImageCompressed(file, maxDim, quality){
@@ -1857,7 +1861,13 @@ function renderApp(){
   else if(currentView.screen==="addPlant"){ root.innerHTML = renderAddPlant(); bindAddPlantEvents(); }
   else if(currentView.screen==="refList"){ root.innerHTML = renderRefList(); bindRefListEvents(); }
   else if(currentView.screen==="refDetail"){ root.innerHTML = renderRefDetail(); bindRefDetailEvents(); }
-  else { root.innerHTML = renderDetail(allPlants().find(p=>p.id===currentView.plantId)); bindDetailEvents(); }
+  else {
+    const plant = allPlants().find(p=>p.id===currentView.plantId);
+    document.title = plant ? `l'HortApp - Cuaderno de plantas - ${plant.nombreComun}` : "l'HortApp — Cuaderno de plantas";
+    root.innerHTML = renderDetail(plant); bindDetailEvents();
+    return;
+  }
+  document.title = "l'HortApp — Cuaderno de plantas";
 }
 function render(){ renderApp(); }
 
@@ -2541,9 +2551,12 @@ function renderDiario(p){
 
 function bindDetailEvents(){
   document.getElementById("back").addEventListener("click", ()=>{ currentView.screen="garden"; renderApp(); });
-  document.getElementById("print-btn").addEventListener("click", (e)=>{
-    e.target.blur();
-    setTimeout(()=> window.print(), 0);
+  document.getElementById("print-btn").addEventListener("click", ()=>{
+    if(isSafariBrowser()){
+      alert("En Safari este botón puede tardar mucho en abrir el diálogo de impresión. Usa Cmd+P (o Archivo → Imprimir) en su lugar, ahí va rápido.");
+      return;
+    }
+    window.print();
   });
   document.getElementById("archive-btn").addEventListener("click", ()=>{
     setArchived(currentView.plantId, !isArchived(currentView.plantId));
