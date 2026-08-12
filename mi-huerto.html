@@ -116,12 +116,12 @@ button{ font-family: var(--font-body); cursor:pointer; }
 .rich-toolbar select{ max-width:92px; }
 .rt-icon-btn{ display:flex; align-items:center; justify-content:center; }
 .rt-apply-all{ font-size:.68rem !important; white-space:nowrap; }
-.rich-editable{ width:100%; font-family:Arial, Helvetica, sans-serif; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:.9rem; min-height:56px; background:#fffefb; color:var(--ink); text-align:justify; }
-.rich-editable > p, .rich-editable > div, .section-view > p, .section-view > div{ margin:0 0 .6em 0; }
+.rich-editable{ width:100%; font-family:Arial, Helvetica, sans-serif; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:.9rem; min-height:56px; background:#fffefb; color:var(--ink); text-align:justify; line-height:1.6; }
+.rich-editable > p, .rich-editable > div, .section-view > p, .section-view > div{ margin:0; }
 .rich-editable:empty::before{ content: attr(data-placeholder); color:var(--ink-soft); font-style:italic; }
 .rich-editable:focus{ outline:none; border-color:var(--green); }
 .rich-editable ul, .rich-editable ol, .section-view ul, .section-view ol{ margin:.3em 0; padding-left:22px; }
-.section-view{ margin:0; font-family:Arial, Helvetica, sans-serif; text-align:justify; }
+.section-view{ margin:0; font-family:Arial, Helvetica, sans-serif; text-align:justify; line-height:1.6; }
 .section-view p{ margin:0 0 .5em; }
 .clima-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:12px; }
 .clima-card{ background: var(--paper-dark); border-radius:12px; padding:10px 6px; text-align:center; display:flex; flex-direction:column; gap:4px; align-items:center; }
